@@ -1,4 +1,4 @@
-// ai-receptionist-backend/index.js (Updated with Bland AI Outbound Calls)
+// ai-receptionist-backend/index.js (Updated with Booking Webhook)
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -23,7 +23,32 @@ const auth = new google.auth.GoogleAuth({
 
 const BLAND_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDU0NDIzMzgsInN1YiI6ImM1MDBhZGU3LTAyM2MtNGFkOC1hMGY0LWQ1OGQ3YTlmM2JiZCIsInVzZXJfaWQiOiJjNTAwYWRlNy0wMjNjLTRhZDgtYTBmNC1kNThkN2E5ZjNiYmQiLCJ1aWQiOiJjNTAwYWRlNy0wMjNjLTRhZDgtYTBmNC1kNThkN2E5ZjNiYmQiLCJpYXQiOjE3NDUwOTY3Mzh9.bSCoH-BhtqOmw1tPrwWEeV32Xw3gC5YLt8fltB8i7B0';
 
-// Utility to fetch appointments
+const BUSINESS_HOURS = {
+  Monday: [10, 17],
+  Tuesday: [16, 19],
+  Wednesday: [10, 17],
+  Thursday: [16, 19],
+  Friday: [10, 14],
+  Saturday: [10, 14],
+  Sunday: null
+};
+
+function parseTimeTo24Hour(timeStr) {
+  const [time, modifier] = timeStr.split(' ');
+  let [hours, minutes] = time.split(':').map(Number);
+  if (modifier === 'PM' && hours !== 12) hours += 12;
+  if (modifier === 'AM' && hours === 12) hours = 0;
+  return hours + minutes / 60;
+}
+
+function isWithinBusinessHours(dateStr, timeStr) {
+  const date = new Date(dateStr);
+  const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+  const hours = parseTimeTo24Hour(timeStr);
+  const window = BUSINESS_HOURS[dayName];
+  return window && hours >= window[0] && hours < window[1];
+}
+
 async function getAppointments() {
   const authClient = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: authClient });
@@ -35,7 +60,6 @@ async function getAppointments() {
   return result.data.values || [];
 }
 
-// Utility to update 'Reminder Sent' to Yes
 async function markReminderSent(rowIndex) {
   const authClient = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: authClient });
@@ -47,7 +71,38 @@ async function markReminderSent(rowIndex) {
   });
 }
 
-// Send conversational reminder calls via Bland AI
+app.post('/check-and-book', async (req, res) => {
+  const { name, phone, date, time, service = "General" } = req.body;
+  try {
+    if (!isWithinBusinessHours(date, time)) {
+      return res.status(400).json({ status: 'fail', message: 'Outside business hours.' });
+    }
+
+    const existing = await getAppointments();
+    const isBooked = existing.some(row => row[2] === date && row[3] === time);
+
+    if (isBooked) {
+      return res.status(409).json({ status: 'fail', message: 'Time slot already booked.' });
+    }
+
+    const authClient = await auth.getClient();
+    const sheets = google.sheets({ version: 'v4', auth: authClient });
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: 'Sheet1!A:F',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [[name, phone, date, time, service, 'No']]
+      }
+    });
+
+    res.json({ status: 'success', message: 'Appointment booked.' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ status: 'error', message: 'Something went wrong.' });
+  }
+});
+
 app.post('/send-reminders', async (req, res) => {
   try {
     const appointments = await getAppointments();
@@ -76,7 +131,6 @@ app.post('/send-reminders', async (req, res) => {
   }
 });
 
-// Inbound and SMS routes unchanged for now
 app.post('/voice', (req, res) => {
   const twiml = new VoiceResponse();
   twiml.say("Hi! Thanks for calling My Vitality Med Spa. I'm Mia, your virtual receptionist. Please leave a message.");
@@ -112,3 +166,4 @@ app.post('/sms', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
