@@ -1,4 +1,4 @@
-// ai-receptionist-backend/index.js (Patched to handle missing time safely)
+// ai-receptionist-backend/index.js (Now with full request logging)
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -74,6 +74,8 @@ async function markReminderSent(rowIndex) {
 
 app.post('/check-and-book', async (req, res) => {
   const { name, phone, date, time, service = "General" } = req.body;
+  console.log("📥 Booking Request Received:", req.body);
+
   try {
     if (!date || !time || !name || !phone) {
       return res.status(400).json({ status: 'fail', message: 'Missing required fields.' });
@@ -103,7 +105,7 @@ app.post('/check-and-book', async (req, res) => {
 
     res.json({ status: 'success', message: 'Appointment booked.' });
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error in booking:", error);
     res.status(500).json({ status: 'error', message: 'Something went wrong.' });
   }
 });
@@ -171,5 +173,3 @@ app.post('/sms', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
-
