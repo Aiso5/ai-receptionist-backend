@@ -1,4 +1,4 @@
-// ai-receptionist-backend/index.js (Updated with Booking Webhook)
+// ai-receptionist-backend/index.js (Patched to handle missing time safely)
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -34,6 +34,7 @@ const BUSINESS_HOURS = {
 };
 
 function parseTimeTo24Hour(timeStr) {
+  if (!timeStr) return null;
   const [time, modifier] = timeStr.split(' ');
   let [hours, minutes] = time.split(':').map(Number);
   if (modifier === 'PM' && hours !== 12) hours += 12;
@@ -46,7 +47,7 @@ function isWithinBusinessHours(dateStr, timeStr) {
   const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
   const hours = parseTimeTo24Hour(timeStr);
   const window = BUSINESS_HOURS[dayName];
-  return window && hours >= window[0] && hours < window[1];
+  return window && hours !== null && hours >= window[0] && hours < window[1];
 }
 
 async function getAppointments() {
@@ -74,6 +75,10 @@ async function markReminderSent(rowIndex) {
 app.post('/check-and-book', async (req, res) => {
   const { name, phone, date, time, service = "General" } = req.body;
   try {
+    if (!date || !time || !name || !phone) {
+      return res.status(400).json({ status: 'fail', message: 'Missing required fields.' });
+    }
+
     if (!isWithinBusinessHours(date, time)) {
       return res.status(400).json({ status: 'fail', message: 'Outside business hours.' });
     }
@@ -166,4 +171,5 @@ app.post('/sms', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
 
