@@ -52,39 +52,40 @@ function getTomorrowStr() {
 }
 
 // 1) Outbound reminder calls for tomorrow
-app.post('/send-reminders', async (req, res) => {
-  try {
-    const tomorrowStr = getTomorrowStr();
-    const appointments = await getAppointments();
+ app.post('/send-reminders', async (req, res) => {
+   try {
+     const tomorrowStr = getTomorrowStr();
+     const appointments = await getAppointments();
 
-    for (let i = 0; i < appointments.length; i++) {
-      const [name, phone, date, time, service, status] = appointments[i];
-      // only call tomorrow's and not-yet-confirmed
-      if (date !== tomorrowStr) continue;
-      if (status && status.toLowerCase() !== 'no') continue;
+     for (let i = 0; i < appointments.length; i++) {
+       const [name, phone, date, time, service, status] = appointments[i];
+       if (date !== tomorrowStr) continue;
+-      if (status && status.toLowerCase() !== 'no') continue;
++      if (status && ['yes','cancelled','reschedule'].includes(status.toLowerCase())) continue;
 
-      await axios.post('https://api.bland.ai/v1/calls', {
-        phone_number: phone,
-        voice: 'June',
-        task: `You're Mia from My Vitality Med Spa. I'm calling to confirm your ${service} appointment tomorrow at ${time}. If you can make it, please say "yes". If you need to cancel, say "no". If you'd like to reschedule, say "reschedule".`,
-        webhook_url: `${BASE_URL}/handle-confirmation`
-      }, {
-        headers: {
-          Authorization: `Bearer ${BLAND_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      });
+       await axios.post('https://api.bland.ai/v1/calls', {
+         phone_number: phone,
+         voice: 'June',
+         task: `You're Mia from My Vitality Med Spa. I'm calling to confirm your ${service} appointment tomorrow at ${time}. If you can make it, please say "yes". If you need to cancel, say "no". If you'd like to reschedule, say "reschedule".`,
+         webhook_url: `${BASE_URL}/handle-confirmation`
+       }, {
+         headers: {
+           Authorization: `Bearer ${BLAND_API_KEY}`,
+           'Content-Type': 'application/json'
+         }
+       });
 
-      // mark as called so we don't call twice
-      await updateAppointmentStatus(i, 'Called');
-    }
+-      // remove this so we only write status when they reply
+-      await updateAppointmentStatus(i, 'Called');
+     }
 
-    res.send('Outbound calls scheduled.');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Failed to send reminders');
-  }
-});
+     res.send('Outbound calls scheduled.');
+   } catch (err) {
+     console.error(err);
+     res.status(500).send('Failed to send reminders');
+   }
+ });
+
 
 // 2) Handle confirmation replies from Bland’s webhook outbound calls changes made
 app.post('/handle-confirmation', async (req, res) => {
