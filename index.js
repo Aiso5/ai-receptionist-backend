@@ -5,6 +5,8 @@ const axios = require('axios');
 const { google } = require('googleapis');
 const bodyParser = require('body-parser');
 const fs = require('fs');
+const calendar = google.calendar({ version: 'v3', auth: await auth.getClient() });
+
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
