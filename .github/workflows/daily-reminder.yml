@@ -1,0 +1,14 @@
+name: Daily Reminder
+
+on:
+  schedule:
+    # Runs at 09:00 America/Chicago each day. 09:00 CDT = 14:00 UTC (adjust for DST if needed)
+    - cron: '0 14 * * *'
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger send-reminders endpoint
+        run: |
+          curl -X POST https://ai-receptionist-backend-b7yp.onrender.com/send-reminders
