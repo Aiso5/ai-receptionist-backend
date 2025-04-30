@@ -52,9 +52,14 @@ app.post('/check-and-book', async (req, res) => {
   }
   try {
     const calendar = await getCalendar();
-    const start = `${date}T${to24h(time)}:00`;
-    const endHour = parseInt(to24h(time).slice(0,2), 10) + 1;
-    const end = `${date}T${String(endHour).padStart(2,'0')}:00`;
+
+    // convert “H:MM AM/PM” → “HH:MM”
+    const [hour, minute] = to24h(time).split(':');
+    // build RFC3339 timestamps with seconds
+    const start = `${date}T${hour.padStart(2,'0')}:${minute}:00`;
+    const endHour = String((parseInt(hour, 10) + 1) % 24).padStart(2,'0');
+    const end    = `${date}T${endHour}:${minute}:00`;
+
     await calendar.events.insert({
       calendarId: CALENDAR_ID,
       requestBody: {
@@ -65,9 +70,10 @@ app.post('/check-and-book', async (req, res) => {
         extendedProperties: { private: { confirmationStatus: 'Pending' } }
       }
     });
+
     res.json({ status: 'success', message: 'Appointment booked.' });
   } catch (err) {
-    console.error(err);
+    console.error('❌ Error in booking:', err);
     res.status(500).json({ status: 'error', message: 'Booking failed.' });
   }
 });
