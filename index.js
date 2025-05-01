@@ -184,59 +184,67 @@ app.post('/handle-confirmation', async (req, res) => {
   }
 });
 
-// 4) Call status webhook -> retry or SMS fallback
+// 4) Call status webhook → retry or SMS fallback
 app.post('/call-status', async (req, res) => {
   const { status, phone_number } = req.body;
   console.log('🔄 Call status:', req.body);
+
   try {
     const tomorrow = getTomorrowStr();
     const calendar = await getCalendar();
     const listRes = await calendar.events.list({
       calendarId: CALENDAR_ID,
-      timeMin: `${tomorrow}T00:00:00-05:00`, timeMax: `${tomorrow}T23:59:59-05:00`,
+      timeMin:  `${tomorrow}T00:00:00-05:00`,
+      timeMax:  `${tomorrow}T23:59:59-05:00`,
       singleEvents: true
     });
-    const ev = (listRes.data.items || []).find(e => (e.description||'').includes(phone_number) &&
+
+    // find the matching Pending event by phone
+    const ev = listRes.data.items.find(e =>
+      (e.description||'').includes(phone_number) &&
       e.extendedProperties?.private?.confirmationStatus === 'Pending'
     );
     if (!ev) return res.sendStatus(404);
 
+    // read & increment attempts
     const props = ev.extendedProperties.private;
     let attempts = parseInt(props.attempts || '0', 10);
 
     if ((status === 'no-answer' || status === 'busy') && attempts < 2) {
       attempts++;
-      // patch attempts
+
+      // build a new description that includes the updated attempt count
+      const newDescription = `Phone: ${phone_number} | attempts: ${attempts}`;
+
+      // patch both description *and* extendedProperties.attempts
       await calendar.events.patch({
         calendarId: CALENDAR_ID,
-        eventId: ev.id,
-        requestBody: { extendedProperties: { private: { ...props, attempts: attempts.toString() } } }
+        eventId:     ev.id,
+        requestBody: {
+          description: newDescription,
+          extendedProperties: {
+            private: {
+              ...props,
+              attempts: attempts.toString()
+            }
+          }
+        }
       });
-      // schedule retry in 2 hours
+
+      // schedule a retry in 2 hours (for testing you can shorten this)
       setTimeout(async () => {
         await axios.post('https://api.bland.ai/v1/calls', {
           phone_number,
           voice: 'June',
-          task: ev.summary.includes('-') ? `You're Mia calling about your appointment via My Vitality Med Spa.` : '',
-          callback_url: `${BASE_URL}/handle-confirmation`,
-          status_callback: `${BASE_URL}/call-status`
-        }, { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } });
+          task: `You're Mia calling about your appointment at My Vitality Med Spa.`,
+          callback_url:  `${BASE_URL}/handle-confirmation`,
+          status_callback:`${BASE_URL}/call-status`
+        }, {
+          headers: { Authorization: `Bearer ${BLAND_API_KEY}` }
+        });
       }, 2 * 60 * 60 * 1000);
 
-    } else if (status === 'no-answer' && attempts >= 2) {
-      // SMS fallback
-      await twilioClient.messages.create({
-        to: phone_number,
-        from: TWILIO_NUMBER,
-        body: `Hi, we tried calling to confirm your appointment tomorrow. Reply YES to confirm, NO to cancel, or RESCHEDULE to pick a new time.`
-      });
-      // mark SMS sent
-      await calendar.events.patch({
-        calendarId: CALENDAR_ID,
-        eventId: ev.id,
-        requestBody: { extendedProperties: { private: { ...props, confirmationStatus: 'SMS Sent' } } }
-      });
-    }
+    } // else if you want SMS fallback later ...
 
     res.sendStatus(200);
   } catch (err) {
