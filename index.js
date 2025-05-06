@@ -59,8 +59,8 @@ app.post('/check-and-book', async (req, res) => {
     if(!timeRe.test(time)) return res.status(400).json({status:'fail',message:'Time must be H:MM AM/PM'});
 
     // Build ISO slot
-    const [h24,min] = to24h(time).split(':');
-    const isoSlot = `${date}T${h24}:${min}:00`;
+    const [h24, min] = to24h(time).split(':');
+    const isoSlot = `${date}T${h24}:${min}:00-05:00`;
 
     // Create in GHL
     await axios.post('https://rest.gohighlevel.com/v1/appointments/', {
