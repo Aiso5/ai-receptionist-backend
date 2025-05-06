@@ -50,11 +50,11 @@ function to24h(time12h) {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 
-// 1) Inbound booking -> create calendar event with attempts counter
+// 1) Inbound booking → create calendar event with attempts counter
 app.post('/check-and-book', async (req, res) => {
   try {
+    // pull raw values
     let { name, phone, date, time, service = 'General' } = req.body;
-    console.log('📥 Booking Received:', req.body);
 
     // --- Normalize any arrays into strings ---
     if (Array.isArray(date)) date = date.join('');
@@ -62,37 +62,39 @@ app.post('/check-and-book', async (req, res) => {
     date = String(date || '').trim();
     time = String(time || '').trim();
 
-    // --- Validate format early ---
+    // log the cleaned up values so you know what will go into Calendar
+    console.log('📥 Booking (normalized):', { name, phone, date, time, service });
+
+    // --- Validate early ---
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;
     const timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
     if (!name || !phone || !date || !time) {
       return res.status(400).json({ status: 'fail', message: 'Missing required fields.' });
     }
     if (!dateRe.test(date)) {
-      return res.status(400).json({ status:'fail', message:'Invalid date – must be YYYY‑MM‑DD' });
+      return res.status(400).json({ status: 'fail', message: 'Invalid date – must be YYYY‑MM‑DD' });
     }
     if (!timeRe.test(time)) {
-      return res.status(400).json({ status:'fail', message:'Invalid time – must be H:MM AM/PM' });
+      return res.status(400).json({ status: 'fail', message: 'Invalid time – must be H:MM AM/PM' });
     }
 
+    // build your RFC‑3339 start/end timestamps
     const calendar = await getCalendar();
     const [hour, minute] = to24h(time).split(':');
     const start   = `${date}T${hour}:${minute}:00`;
-    const endHour = String((parseInt(hour,10)+1) % 24).padStart(2,'0');
+    const endHour = String((Number(hour) + 1) % 24).padStart(2,'0');
     const end     = `${date}T${endHour}:${minute}:00`;
 
+    // finally insert
     await calendar.events.insert({
       calendarId: CALENDAR_ID,
       requestBody: {
-        summary:            `${service} - ${name}`,
-        description:        `Phone: ${phone}`,
-        start:              { dateTime: start, timeZone: 'America/Chicago' },
-        end:                { dateTime: end,   timeZone: 'America/Chicago' },
+        summary:     `${service} - ${name}`,
+        description: `Phone: ${phone}`,
+        start:       { dateTime: start, timeZone: 'America/Chicago' },
+        end:         { dateTime: end,   timeZone: 'America/Chicago' },
         extendedProperties: {
-          private: {
-            confirmationStatus: 'Pending',
-            attempts:           '0'
-          }
+          private: { confirmationStatus: 'Pending', attempts: '0' }
         }
       }
     });
