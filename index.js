@@ -36,7 +36,7 @@ const SERVICE_TYPE_IDS = {
 
 
 // Twilio SMS client
-ing const twilioClient = twilioLib(TWILIO_SID, TWILIO_TOKEN);
+const twilioClient = twilioLib(TWILIO_SID, TWILIO_TOKEN);
 
 // Helpers
 function getTomorrowRange() {
