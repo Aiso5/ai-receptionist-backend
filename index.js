@@ -29,13 +29,11 @@ const {
 
 // Map your Med‑Spa services → GHL Appointment Type IDs
 const SERVICE_TYPE_IDS = {
-  GHL_TYPE_MICRONEEDLING_ID=CVV5l5hW8oQj9fCvJRQ0, 
-  GHL_TYPE_FACIAL_ID=I9kLB4y6IA6gjSRhoPkE,  
-  GHL_TYPE_BODYCONTOURING_ID=atRqPW5SeTiOXwDx8VZx,  
-  GHL_TYPE_PRP_INJECTIONS_ID=hm9zPDrD0kh86uVaZDvwW,  
-  GHL_TYPE_LASER_HAIR_REMOVAL_ID=nddmesx61WaFpfrQR3ut  
-
+  Microneedling: GHL_TYPE_MICRONEEDLING_ID,
+  Facial:        GHL_TYPE_FACIAL_ID,
+  BodyContouring:GHL_TYPE_BODYCONTOURING_ID
 };
+
 
 // Twilio SMS client
 ing const twilioClient = twilioLib(TWILIO_SID, TWILIO_TOKEN);
