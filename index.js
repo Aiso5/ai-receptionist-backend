@@ -1,10 +1,10 @@
 // ai-receptionist-backend/index.js
 require('dotenv').config();
-const express   = require('express');
-const axios     = require('axios');
-const bodyParser= require('body-parser');
-const fs        = require('fs');
-const twilioLib = require('twilio');
+const express    = require('express');
+const axios      = require('axios');
+const bodyParser = require('body-parser');
+const fs         = require('fs');
+const twilioLib  = require('twilio');
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -26,14 +26,14 @@ const {
   GHL_TYPE_LASER_HAIR_REMOVAL_ID
 } = process.env;
 
-
 // Map your Med‑Spa services → GHL Appointment Type IDs
 const SERVICE_TYPE_IDS = {
-  Microneedling: GHL_TYPE_MICRONEEDLING_ID,
-  Facial:        GHL_TYPE_FACIAL_ID,
-  BodyContouring:GHL_TYPE_BODYCONTOURING_ID
+  Microneedling:    GHL_TYPE_MICRONEEDLING_ID,
+  Facial:           GHL_TYPE_FACIAL_ID,
+  BodyContouring:   GHL_TYPE_BODYCONTOURING_ID,
+  PRPInjections:    GHL_TYPE_PRP_INJECTIONS_ID,
+  LaserHairRemoval: GHL_TYPE_LASER_HAIR_REMOVAL_ID
 };
-
 
 // Twilio SMS client
 const twilioClient = twilioLib(TWILIO_SID, TWILIO_TOKEN);
@@ -47,6 +47,7 @@ function getTomorrowRange() {
   end.setHours(23, 59, 59, 999);
   return { startMs: start.getTime(), endMs: end.getTime() };
 }
+
 function to24h(time12h) {
   const [t, mod] = time12h.split(' ');
   let [h, m] = t.split(':').map(Number);
@@ -69,14 +70,17 @@ app.post('/check-and-book', async (req, res) => {
     if (!name || !phone || !date || !time) {
       return res.status(400).json({ status: 'fail', message: 'Missing fields.' });
     }
-    if (!dateRe.test(date)) return res.status(400).json({ status: 'fail', message: 'Date must be YYYY‑MM‑DD' });
-    if (!timeRe.test(time)) return res.status(400).json({ status: 'fail', message: 'Time must be H:MM AM/PM' });
+    if (!dateRe.test(date)) {
+      return res.status(400).json({ status: 'fail', message: 'Date must be YYYY‑MM‑DD' });
+    }
+    if (!timeRe.test(time)) {
+      return res.status(400).json({ status: 'fail', message: 'Time must be H:MM AM/PM' });
+    }
 
     // Build ISO slot with timezone offset
     const [h24, min] = to24h(time).split(':');
     const isoSlot = `${date}T${h24}:${min}:00-05:00`;
 
-        // ──────────────────────────────────────────────────────────────
     // 1) Fetch available slots for that date
     const dayStart = new Date(`${date}T00:00:00-05:00`).getTime();
     const dayEnd   = new Date(`${date}T23:59:59-05:00`).getTime();
@@ -89,9 +93,7 @@ app.post('/check-and-book', async (req, res) => {
     );
     const slot = slotsRes.data.slots.find(s => s.startTime === isoSlot);
     if (!slot) {
-      return res
-        .status(409)
-        .json({ status:'fail', message:'Selected time slot unavailable' });
+      return res.status(409).json({ status: 'fail', message: 'Selected time slot unavailable' });
     }
 
     // 2) Book by slotId instead of selectedSlot
@@ -101,10 +103,7 @@ app.post('/check-and-book', async (req, res) => {
       phone,
       name,
       title:            service,
-      // include appointment-type if defined
-      ...(SERVICE_TYPE_IDS[service] && {
-        appointmentTypeId: SERVICE_TYPE_IDS[service]
-      })
+      ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
     };
 
     await axios.post(
@@ -113,12 +112,19 @@ app.post('/check-and-book', async (req, res) => {
       {
         headers: {
           Authorization: `Bearer ${GHL_API_KEY}`,
-          'Content-Type':  'application/json'
+          'Content-Type': 'application/json'
         }
       }
     );
-    // ──────────────────────────────────────────────────────────────
 
+    // Send back success
+    return res.json({ status: 'success', message: 'Appointment booked in GHL.' });
+
+  } catch (err) {
+    console.error('Booking error:', err.response?.data || err);
+    return res.status(500).json({ status: 'error', message: 'Booking failed.' });
+  }
+});
 
 // 2) Send reminders → list tomorrow’s GHL appts & Bland calls
 app.post('/send-reminders', async (req, res) => {
@@ -222,5 +228,6 @@ app.post('/call-status', async (req, res) => {
   }
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server on ${PORT}`));
+app.listen(PORT, () => console.log(`Server on port ${PORT}`));
