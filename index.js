@@ -59,7 +59,6 @@ function to24h(time12h) {
   if (mod === 'AM' && h === 12) h = 0;
   return [String(h).padStart(2, '0'), String(m).padStart(2, '0')].join(':');
 }
-
 // 1) Booking → create GHL appointment
 app.post('/check-and-book', async (req, res) => {
   try {
@@ -70,7 +69,8 @@ app.post('/check-and-book', async (req, res) => {
     time = time.trim();
 
     // Validation
-    const dateRe = /^\d{4}-\d{2}-\d{2}$/, timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/,
+          timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
     if (!name || !phone || !date || !time) {
       return res.status(400).json({ status: 'fail', message: 'Missing fields.' });
     }
@@ -85,11 +85,11 @@ app.post('/check-and-book', async (req, res) => {
     const [h24, min] = to24h(time).split(':');
     const isoSlot = `${date}T${h24}:${min}:00-05:00`;
 
-    // Define day boundaries
+    // Define day boundaries for slot lookup
     const startOfDay = new Date(`${date}T00:00:00-05:00`).getTime();
     const endOfDay   = new Date(`${date}T23:59:59-05:00`).getTime();
 
-    // Fetch available slots
+    // 1) Fetch available slots
     const slotsRes = await axios.get(
       'https://rest.gohighlevel.com/v1/appointments/slots',
       {
@@ -99,33 +99,33 @@ app.post('/check-and-book', async (req, res) => {
     );
     console.log('Slots fetched:', slotsRes.data);
 
-    // Extract slots array for the given date
+    // 2) Extract slots array for the given date
     const daySlots = slotsRes.data[date]?.slots;
     if (!daySlots || !daySlots.includes(isoSlot)) {
       return res.status(409).json({ status: 'fail', message: 'Selected time slot unavailable' });
     }
 
-    // Use ISO string as slotId
-    const slotId = isoSlot;
-
-    // Build booking payload
+    // 3) Build booking payload — note selectedTimezone & selectedSlot
     const bookPayload = {
-      calendarId: GHL_CALENDAR_ID,
-      slotId:     slotId,
+      calendarId:       GHL_CALENDAR_ID,
+      selectedTimezone: 'America/Chicago',
+      selectedSlot:     isoSlot,
       phone,
       name,
-      title:      service,
+      title:            service,
       ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
     };
 
-    // Book the appointment
+    // 4) Create the appointment
     await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
       bookPayload,
       { headers: { Authorization: `Bearer ${GHL_API_KEY}`, 'Content-Type': 'application/json' } }
     );
 
+    // 5) Respond success
     return res.json({ status: 'success', message: 'Appointment booked in GHL.' });
+
   } catch (err) {
     console.error('Booking error:', err.response?.data || err);
     return res.status(500).json({ status: 'error', message: 'Booking failed.' });
