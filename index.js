@@ -91,21 +91,48 @@ app.post('/check-and-book', async (req, res) => {
     );
     console.log('Slots fetched:', slotsRes.data);
 
-    // Find matching slot
-    const slot = slotsRes.data.slots.find(s => s.startTime === isoSlot);
-    if (!slot) {
-      return res.status(409).json({ status: 'fail', message: 'Time slot unavailable' });
-    }
+ // ──────────────────────────────────────────────────────────────
+// 1) Fetch available slots for that date
+const startOfDay = new Date(`${date}T00:00:00-05:00`).getTime();
+const endOfDay   = new Date(`${date}T23:59:59-05:00`).getTime();
+const slotsRes = await axios.get(
+  'https://rest.gohighlevel.com/v1/appointments/slots',
+  {
+    headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+    params:  { calendarId: GHL_CALENDAR_ID, startDate: startOfDay, endDate: endOfDay }
+  }
+);
+console.log('Slots fetched:', slotsRes.data);
 
-    // Book appointment by slotId
-    const bookPayload = {
-      calendarId:       GHL_CALENDAR_ID,
-      slotId:           slot.id,
-      phone,
-      name,
-      title:            service,
-      ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
-    };
+// 2) Pull the array of ISO strings for that date
+const daySlots = slotsRes.data[date]?.slots;
+if (!daySlots || !daySlots.includes(isoSlot)) {
+  return res
+    .status(409)
+    .json({ status: 'fail', message: 'Selected time slot unavailable' });
+}
+
+// 3) Use the ISO string itself as your slotId
+const slotId = isoSlot;
+
+// 4) Build your bookPayload
+const bookPayload = {
+  calendarId: GHL_CALENDAR_ID,
+  slotId:     slotId,      // <— here’s where you put isoSlot
+  phone,
+  name,
+  title:      service,
+  ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
+};
+
+// 5) Finally do the booking
+await axios.post(
+  'https://rest.gohighlevel.com/v1/appointments/',
+  bookPayload,
+  { headers: { Authorization: `Bearer ${GHL_API_KEY}`, 'Content-Type': 'application/json' } }
+);
+// ──────────────────────────────────────────────────────────────
+
 
     await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
