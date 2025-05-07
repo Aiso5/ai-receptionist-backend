@@ -84,13 +84,23 @@ app.post('/check-and-book', async (req, res) => {
     // 1) Fetch available slots for that date
     const dayStart = new Date(`${date}T00:00:00-05:00`).getTime();
     const dayEnd   = new Date(`${date}T23:59:59-05:00`).getTime();
+        // ──────────────────────────────────────────────────────────────
+    // 1) Fetch available slots for that date
+    const dayStart = new Date(`${date}T00:00:00-05:00`).getTime();
+    const dayEnd   = new Date(`${date}T23:59:59-05:00`).getTime();
+    // Use correct slots endpoint
     const slotsRes = await axios.get(
-      `https://rest.gohighlevel.com/v1/calendar/${GHL_CALENDAR_ID}/slots`,
+      'https://rest.gohighlevel.com/v1/slots',
       {
         headers: { Authorization: `Bearer ${GHL_API_KEY}` },
-        params:  { startDate: dayStart, endDate: dayEnd }
+        params:  { calendarId: GHL_CALENDAR_ID, startDate: dayStart, endDate: dayEnd }
       }
     );
+    const slot = slotsRes.data.slots.find(s => s.startTime === isoSlot);
+    if (!slot) {
+      return res.status(409).json({ status: 'fail', message: 'Selected time slot unavailable' });
+    }
+
     const slot = slotsRes.data.slots.find(s => s.startTime === isoSlot);
     if (!slot) {
       return res.status(409).json({ status: 'fail', message: 'Selected time slot unavailable' });
