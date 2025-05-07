@@ -73,35 +73,40 @@ app.post('/check-and-book', async (req, res) => {
     if (!timeRe.test(time))
       return res.status(400).json({ status: 'fail', message: 'Time must be H:MM AM/PM' });
 
-    // Build ISO slot with timezone offset
+    // Build ISO slot with timezone
     const [h24, min] = to24h(time).split(':');
     const isoSlot = `${date}T${h24}:${min}:00-05:00`;
 
-    // Fetch available slots for that date (correct endpoint)
-const slotsRes = await axios.get(
-  'https://rest.gohighlevel.com/v1/appointments/slots',
-  {
-    headers: { Authorization: `Bearer ${GHL_API_KEY}` },
-    params: {
-      calendarId: GHL_CALENDAR_ID,
-      startDate:  startOfDay,
-      endDate:    endOfDay
-    }
-  }
-);
+    // Define day boundaries for slot lookup
+    const startOfDay = new Date(`${date}T00:00:00-05:00`).getTime();
+    const endOfDay =   new Date(`${date}T23:59:59-05:00`).getTime();
 
+    // Fetch available slots
+    const slotsRes = await axios.get(
+      'https://rest.gohighlevel.com/v1/appointments/slots',
+      {
+        headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+        params:  { calendarId: GHL_CALENDAR_ID, startDate: startOfDay, endDate: endOfDay }
+      }
+    );
     console.log('Slots fetched:', slotsRes.data);
-    const slot = slotsRes.data.slots.find(s => s.startTime === isoSlot);
-    if (!slot)
-      return res.status(409).json({ status: 'fail', message: 'Time slot unavailable' });
 
-    // Book by slotId
+    // Find matching slot
+    const slot = slotsRes.data.slots.find(s => s.startTime === isoSlot);
+    if (!slot) {
+      return res.status(409).json({ status: 'fail', message: 'Time slot unavailable' });
+    }
+
+    // Book appointment by slotId
     const bookPayload = {
       calendarId:       GHL_CALENDAR_ID,
       slotId:           slot.id,
-      phone, name, title: service,
+      phone,
+      name,
+      title:            service,
       ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
     };
+
     await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
       bookPayload,
@@ -109,7 +114,6 @@ const slotsRes = await axios.get(
     );
 
     return res.json({ status: 'success', message: 'Appointment booked in GHL.' });
-
   } catch (err) {
     console.error('Booking error:', err.response?.data || err);
     return res.status(500).json({ status: 'error', message: 'Booking failed.' });
@@ -120,24 +124,33 @@ const slotsRes = await axios.get(
 app.post('/send-reminders', async (req, res) => {
   const hr = new Date().getHours();
   if (hr < 9 || hr >= 18) return res.status(429).send('Outside call window');
+
   try {
     const { startMs, endMs } = getTomorrowRange();
     const listRes = await axios.get('https://rest.gohighlevel.com/v1/appointments/', {
       headers: { Authorization: `Bearer ${GHL_API_KEY}` },
       params: { startDate: startMs, endDate: endMs, calendarId: GHL_CALENDAR_ID, includeAll: true }
     });
-    for (const a of listRes.data.appointments || []) {
-      if (!['booked','confirmed'].includes(a.appointmentStatus)) continue;
+    const appts = listRes.data.appointments || [];
+
+    for (const a of appts) {
+      if (!['booked', 'confirmed'].includes(a.appointmentStatus)) continue;
       const phone = a.contact?.phone || a.phone;
       if (!phone) continue;
+
       const when = new Date(a.startTime).toLocaleTimeString('en-US',{hour:'numeric',minute:'numeric',hour12:true});
-      const task = `Hi ${a.title} patient, this is Mia confirming your ${a.title} tomorrow at ${when}. Say "yes", "no", or "reschedule."`;
-      await axios.post('https://api.bland.ai/v1/calls', { phone_number:phone, voice:'June', task, callback_url:`${BASE_URL}/handle-confirmation`, status_callback:`${BASE_URL}/call-status` }, { headers:{Authorization:`Bearer ${BLAND_API_KEY}`} });
-      fs.appendFileSync('call-log.json', JSON.stringify({ts:new Date().toISOString(),event:'call-sent',phone})+'\n');
+      const task = `Hi ${a.title} patient, this is Mia confirming your ${a.title} tomorrow at ${when}. Say \"yes\" to confirm, \"no\" to cancel, or \"reschedule.\"`;
+
+      await axios.post('https://api.bland.ai/v1/calls',
+        { phone_number: phone, voice: 'June', task, callback_url: `${BASE_URL}/handle-confirmation`, status_callback: `${BASE_URL}/call-status` },
+        { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } }
+      );
+
+      fs.appendFileSync('call-log.json', JSON.stringify({ ts: new Date().toISOString(), event: 'call-sent', phone }) + '\n');
     }
     res.send('Outbound calls scheduled.');
   } catch (err) {
-    console.error('Reminder error:', err.response?.data||err);
+    console.error('Reminder error:', err.response?.data || err);
     res.status(500).send('Failed to send reminders');
   }
 });
@@ -147,29 +160,54 @@ app.post('/handle-confirmation', async (req, res) => {
   const { phone_number, confirmation } = req.body;
   try {
     const { startMs, endMs } = getTomorrowRange();
-    const appts = (await axios.get('https://rest.gohighlevel.com/v1/appointments/', { headers:{Authorization:`Bearer ${GHL_API_KEY}`}, params:{startDate:startMs,endDate:endMs,calendarId:GHL_CALENDAR_ID,includeAll:true} })).data.appointments;
-    const appt = appts.find(a => (a.contact?.phone||a.phone)===phone_number);
+    const apptsRes = await axios.get('https://rest.gohighlevel.com/v1/appointments/', {
+      headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+      params: { startDate: startMs, endDate: endMs, calendarId: GHL_CALENDAR_ID, includeAll: true }
+    });
+    const appt = (apptsRes.data.appointments || []).find(a => (a.contact?.phone || a.phone) === phone_number);
     if (!appt) return res.status(404).send('Appointment not found');
+
     const resp = confirmation.trim().toLowerCase();
-    const status = (resp==='yes')?'confirmed':'cancelled';
-    await axios.put(`https://rest.gohighlevel.com/v1/appointments/${appt.id}/status`, {status}, {headers:{Authorization:`Bearer ${GHL_API_KEY}`,'Content-Type':'application/json'}});
-    if (resp==='yes') await axios.patch(`https://rest.gohighlevel.com/v1/appointments/${appt.id}`,{colorHex:'#00FF00'},{headers:{Authorization:`Bearer ${GHL_API_KEY}`,'Content-Type':'application/json'}});
+    const status = resp === 'yes' ? 'confirmed' : 'cancelled';
+
+    await axios.put(
+      `https://rest.gohighlevel.com/v1/appointments/${appt.id}/status`,
+      { status },
+      { headers: { Authorization: `Bearer ${GHL_API_KEY}`, 'Content-Type': 'application/json' } }
+    );
+
+    if (resp === 'yes') {
+      await axios.patch(
+        `https://rest.gohighlevel.com/v1/appointments/${appt.id}`,
+        { colorHex: '#00FF00' },
+        { headers: { Authorization: `Bearer ${GHL_API_KEY}`, 'Content-Type': 'application/json' } }
+      );
+    }
     res.sendStatus(200);
   } catch (err) {
-    console.error('Confirmation error:', err.response?.data||err);
+    console.error('Confirmation error:', err.response?.data || err);
     res.status(500).send('Confirmation handling failed');
   }
 });
 
 // 4) Call status → SMS fallback
 app.post('/call-status', async (req, res) => {
-  const {status, phone_number} = req.body;
+  const { status, phone_number } = req.body;
   try {
-    if (['no-answer','busy'].includes(status)) await twilioClient.messages.create({from:TWILIO_NUMBER,to:phone_number,body:'We tried calling to confirm your appointment tomorrow. Reply YES, NO, or RESCHEDULE.'});
+    if (['no-answer','busy'].includes(status)) {
+      await twilioClient.messages.create({
+        from: TWILIO_NUMBER,
+        to:   phone_number,
+        body: 'We tried calling to confirm your appointment tomorrow. Reply YES, NO, or RESCHEDULE.'
+      });
+    }
     res.sendStatus(200);
-  } catch (err) { console.error('Call-status error:', err); res.status(500).send('Call status processing failed'); }
+  } catch (err) {
+    console.error('Call-status error:', err);
+    res.status(500).send('Call status processing failed');
+  }
 });
 
 // Start server
-const PORT = process.env.PORT||3000;
-app.listen(PORT,()=>console.log(`Server on port ${PORT}`));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server on port ${PORT}`));
