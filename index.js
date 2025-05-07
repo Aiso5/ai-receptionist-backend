@@ -148,7 +148,7 @@ app.post('/handle-confirmation',async(req,res)=>{
       `https://rest.gohighlevel.com/v1/appointments/${appt.id}/status`,
       { status: newStatus },
       { headers: { Authorization: `Bearer ${GHL_API_KEY}`, 'Content-Type': 'application/json' } }
-    ),{headers:{Authorization:`Bearer ${GHL_API_KEY}`,'Content-Type':'application/json'}});
+    );
     if(resp==='yes')await axios.patch(`https://rest.gohighlevel.com/v1/appointments/${appt.id}`,{colorHex:'#00FF00'},{headers:{Authorization:`Bearer ${GHL_API_KEY}`,'Content-Type':'application/json'}});
     res.sendStatus(200);
   }catch(err){console.error('Confirmation handling error:',err.response?.data||err);res.status(500).send('Confirmation handling failed');}
