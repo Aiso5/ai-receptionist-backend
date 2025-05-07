@@ -144,7 +144,7 @@ app.post('/handle-confirmation',async(req,res)=>{
     if(!appt){console.error('No appointment matched for phone:',phone_number);return res.status(404).send('Appointment not found');}
     const resp=confirmation.trim().toLowerCase();
     const newStatus=resp==='yes'?'confirmed':'cancelled';
-    await axios.put(`https://rest.gohighlevel.com/v1/appointments/${appt.id}/status`,{status:newStatus},{headers:{Authorization:`Bearer ${GHL_API_KEY}`,'Content-Type':'application/json'}});
+    await axios.put(`https://rest.gohighlevel.com/v1/appointments/${appt.id}/status`,{ appointmentStatus: newStatus },{headers:{Authorization:`Bearer ${GHL_API_KEY}`,'Content-Type':'application/json'}});
     if(resp==='yes')await axios.patch(`https://rest.gohighlevel.com/v1/appointments/${appt.id}`,{colorHex:'#00FF00'},{headers:{Authorization:`Bearer ${GHL_API_KEY}`,'Content-Type':'application/json'}});
     res.sendStatus(200);
   }catch(err){console.error('Confirmation handling error:',err.response?.data||err);res.status(500).send('Confirmation handling failed');}
