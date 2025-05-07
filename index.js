@@ -78,15 +78,18 @@ app.post('/check-and-book', async (req, res) => {
     const isoSlot = `${date}T${h24}:${min}:00-05:00`;
 
     // Fetch available slots for that date (correct endpoint)
-    const startOfDay = new Date(`${date}T00:00:00-05:00`).getTime();
-    const endOfDay   = new Date(`${date}T23:59:59-05:00`).getTime();
-    const slotsRes = await axios.get(
-      `https://rest.gohighlevel.com/v1/calendar/${GHL_CALENDAR_ID}/slots`,
-      {
-        headers: { Authorization: `Bearer ${GHL_API_KEY}` },
-        params:  { startDate: startOfDay, endDate: endOfDay }
-      }
-    );
+const slotsRes = await axios.get(
+  'https://rest.gohighlevel.com/v1/appointments/slots',
+  {
+    headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+    params: {
+      calendarId: GHL_CALENDAR_ID,
+      startDate:  startOfDay,
+      endDate:    endOfDay
+    }
+  }
+);
+
     console.log('Slots fetched:', slotsRes.data);
     const slot = slotsRes.data.slots.find(s => s.startTime === isoSlot);
     if (!slot)
