@@ -109,7 +109,7 @@ app.post('/check-and-book', async (req, res) => {
       phone,
       title:            service,                  // shows up in the "title" column
       appointmentTypeId:SERVICE_TYPE_IDS[service],// ties to your Med‑Spa service record
-      appointmentStatus: 'unconfirmed'            // REQUIRED by GHL
+      appointmentStatus: 'new'            // REQUIRED by GHL
     };
 
     // Create the appointment
