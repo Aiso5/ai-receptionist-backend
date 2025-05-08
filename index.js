@@ -60,6 +60,9 @@ function to24h(time12h) {
   return [String(h).padStart(2,'0'), String(m).padStart(2,'0')].join(':');
 }
 
+// quick health check
+app.get('/health', (req, res) => res.sendStatus(200));
+
 // 1) Booking → create GHL appointment
 app.post('/check-and-book', async (req, res) => {
   try {
