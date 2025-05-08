@@ -62,46 +62,44 @@ app.post('/check-and-book', async (req, res) => {
     let { name, phone, date, time, service = 'General' } = req.body;
     if (Array.isArray(date)) date = date.join('');
     if (Array.isArray(time)) time = time.join('');
-    date = date.trim();
-    time = time.trim();
+    date = date.trim(); time = time.trim();
 
     // Validation
-    const dateRe = /^\d{4}-\d{2}-\d{2}$/, timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/,
+          timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
     if (!name || !phone || !date || !time) {
-      return res.status(400).json({ status: 'fail', message: 'Missing fields.' });
+      return res.status(400).json({ status:'fail', message:'Missing fields.' });
     }
     if (!dateRe.test(date)) {
-      return res.status(400).json({ status: 'fail', message: 'Date must be YYYY‑MM‑DD' });
+      return res.status(400).json({ status:'fail', message:'Date must be YYYY‑MM‑DD' });
     }
     if (!timeRe.test(time)) {
-      return res.status(400).json({ status: 'fail', message: 'Time must be H:MM AM/PM' });
+      return res.status(400).json({ status:'fail', message:'Time must be H:MM AM/PM' });
     }
 
     // Build ISO slot
     const [h24, min] = to24h(time).split(':');
-    const isoSlot = `${date}T${h24}:${min}:00-05:00`;
-
-    // Day bounds
-    const startOfDay = new Date(`${date}T00:00:00-05:00`).getTime();
-    const endOfDay   = new Date(`${date}T23:59:59-05:00`).getTime();
+    const isoSlot      = `${date}T${h24}:${min}:00-05:00`;
 
     // Fetch slots
-    const slotsRes = await axios.get(
+    const startOfDay   = new Date(`${date}T00:00:00-05:00`).getTime();
+    const endOfDay     = new Date(`${date}T23:59:59-05:00`).getTime();
+    const slotsRes     = await axios.get(
       'https://rest.gohighlevel.com/v1/appointments/slots',
-      { headers:{ Authorization:`Bearer ${GHL_API_KEY}` }, params:{ calendarId:GHL_CALENDAR_ID, startDate:startOfDay, endDate:endOfDay } }
+      { headers:{Authorization:`Bearer ${GHL_API_KEY}`},
+        params:{calendarId:GHL_CALENDAR_ID,startDate:startOfDay,endDate:endOfDay}
+      }
     );
-    console.log('Slots fetched:', slotsRes.data);
-
-    const daySlots = slotsRes.data[date]?.slots;
-    if (!daySlots || !daySlots.includes(isoSlot)) {
-      return res.status(409).json({ status: 'fail', message: 'Selected time slot unavailable' });
+    const daySlots = slotsRes.data[date]?.slots || [];
+    if (!daySlots.includes(isoSlot)) {
+      return res.status(409).json({ status:'fail', message:'Selected time slot unavailable' });
     }
 
-    // Split name into first/last
-    const [firstName, ...lastParts] = name.split(' ');
-    const lastName = lastParts.join(' ') || '';
+    // Split name
+    const [firstName, ...rest] = name.split(' ');
+    const lastName = rest.join(' ');
 
-    // Build booking payload
+    // Build booking payload using GHL's Calendar‑Event DTO fields:
     const bookPayload = {
       calendarId:       GHL_CALENDAR_ID,
       selectedTimezone: 'America/Chicago',
@@ -109,23 +107,25 @@ app.post('/check-and-book', async (req, res) => {
       firstName,
       lastName,
       phone,
-      status:           'unconfirmed',
-      ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
+      title:            service,                  // shows up in the "title" column
+      appointmentTypeId:SERVICE_TYPE_IDS[service],// ties to your Med‑Spa service record
+      appointmentStatus: 'unconfirmed'            // REQUIRED by GHL
     };
 
-    // Create appointment
+    // Create the appointment
     await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
       bookPayload,
-      { headers:{ Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
+      { headers:{Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json'} }
     );
 
-    res.json({ status: 'success', message: 'Appointment booked in GHL.' });
+    return res.json({ status:'success', message:'Appointment booked in GHL.' });
   } catch (err) {
     console.error('Booking error:', err.response?.data || err);
-    res.status(500).json({ status: 'error', message: 'Booking failed.' });
+    return res.status(500).json({ status:'error', message:'Booking failed.' });
   }
 });
+
 
 // 2) Send reminders → Bland calls
 app.post('/send-reminders', async (req, res) => {
