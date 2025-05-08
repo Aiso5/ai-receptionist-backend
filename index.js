@@ -49,52 +49,79 @@ function getTomorrowRange(){
 }
 const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
-// ─── 1) BOOK APPOINTMENT ───────────────────────────────────────────────
-app.post('/check-and-book', async (req,res)=>{
-  try{
+// 1) Booking → create GHL appointment
+app.post('/check-and-book', async (req, res) => {
+  try {
     let { name, phone, date, time, service } = req.body;
-    if(!service) return res.status(400).json({status:'fail',message:'Missing service'});
-    service=service.trim();
+
+    // log raw date for debugging
+    console.log('Incoming date:', JSON.stringify(date));
+
+    if (!service) {
+      return res.status(400).json({ status:'fail', message:'Missing service.' });
+    }
+    service = service.trim();
     const calendarId = SERVICE_CAL_IDS[service];
-    if(!calendarId) return res.status(400).json({status:'fail',message:`Unknown service: ${service}`});
+    if (!calendarId) {
+      return res.status(400).json({ status:'fail', message:`Unknown service: ${service}` });
+    }
 
-    // validate
-    const dateRe=/^\d{4}-\\d{2}-\\d{2}$/, timeRe=/^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
-    if(!name||!phone||!date||!time) return res.status(400).json({status:'fail',message:'Missing fields'});
-    if(!dateRe.test(date)) return res.status(400).json({status:'fail',message:'Date must be YYYY-MM-DD'});
-    if(!timeRe.test(time)) return res.status(400).json({status:'fail',message:'Time must be H:MM AM/PM'});
+    // Normalize
+    if (Array.isArray(date)) date = date.join('');
+    if (Array.isArray(time)) time = time.join('');
+    date = date.trim();
+    time = time.trim();
 
-    // ISO timestamps
-    const [h24,min]=to24h(time).split(':');
-    const startISO=`${date}T${h24}:${min}:00-05:00`;
-    const endISO=new Date(new Date(startISO).getTime()+30*60*1000)
-                  .toISOString().replace('.000Z','-05:00');
+    // Correct, single‑backslash regex!
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/,
+          timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
 
-    // payload
-    const payload={
+    console.log('Date matches?', dateRe.test(date), 'Time matches?', timeRe.test(time));
+
+    if (!name || !phone || !date || !time) {
+      return res.status(400).json({ status:'fail', message:'Missing fields.' });
+    }
+    if (!dateRe.test(date)) {
+      return res.status(400).json({ status:'fail', message:'Date must be YYYY-MM-DD' });
+    }
+    if (!timeRe.test(time)) {
+      return res.status(400).json({ status:'fail', message:'Time must be H:MM AM/PM' });
+    }
+
+    // Build ISO times
+    const [h24, min] = to24h(time).split(':');
+    const startISO   = `${date}T${h24}:${min}:00-05:00`;
+    const endISO     = new Date(new Date(startISO).getTime() + 30*60*1000)
+                         .toISOString().replace('.000Z','-05:00');
+
+    const payload = {
       calendarId,
-      meetingLocationType:"custom",
-      meetingLocationId:"default",
-      appointmentStatus:"new",
+      meetingLocationType:   "custom",
+      meetingLocationId:     "default",
+      appointmentStatus:     "new",
       name,
       phone,
-      startTime:startISO,
-      endTime:endISO,
-      ignoreFreeSlotValidation:true
+      startTime:             startISO,
+      endTime:               endISO,
+      ignoreFreeSlotValidation: true
     };
 
-    const { data } = await axios.post(
+    console.log('Booking payload:', payload);
+
+    const createRes = await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
       payload,
-      { headers:{Authorization:`Bearer ${GHL_API_KEY}`}}
+      { headers:{ Authorization:`Bearer ${GHL_API_KEY}` } }
     );
-    res.json({status:'success', id:data.id});
-  }catch(err){
-    console.error('Booking error:',err.response?.data||err);
-    res.status(500).json({status:'error',message:'Booking failed.'});
+
+    console.log('Created appointment:', createRes.data);
+
+    res.json({ status:'success', id:createRes.data.id });
+  } catch (err) {
+    console.error('Booking error:', err.response?.data || err);
+    res.status(500).json({ status:'error', message:'Booking failed.' });
   }
 });
-
 // ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req,res)=>{
   const hr=new Date().getHours();
