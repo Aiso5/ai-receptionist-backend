@@ -39,6 +39,14 @@ const SERVICE_CAL_IDS = {
   "Body Multi Shape":     "fcs6WN0rroebbG97bitr",
   "Laser Treatments":     "ztEI8IyOTmJL7uFzRgCu"
 };
+// --- helper converts "10:00 AM" → "10:00"
+function to24h(time12h) {
+  const [t, mod] = time12h.split(' ');
+  let [h, m] = t.split(':').map(Number);
+  if (mod === 'PM' && h !== 12) h += 12;
+  if (mod === 'AM' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
 // 1) Booking → create GHL appointment
 app.post('/check-and-book', async (req, res) => {
