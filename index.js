@@ -59,7 +59,7 @@ app.post('/check-and-book', async (req,res)=>{
     if(!calendarId) return res.status(400).json({status:'fail',message:`Unknown service: ${service}`});
 
     // validate
-    const dateRe=/^\\d{4}-\\d{2}-\\d{2}$/, timeRe=/^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
+    const dateRe=/^\d{4}-\\d{2}-\\d{2}$/, timeRe=/^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
     if(!name||!phone||!date||!time) return res.status(400).json({status:'fail',message:'Missing fields'});
     if(!dateRe.test(date)) return res.status(400).json({status:'fail',message:'Date must be YYYY-MM-DD'});
     if(!timeRe.test(time)) return res.status(400).json({status:'fail',message:'Time must be H:MM AM/PM'});
