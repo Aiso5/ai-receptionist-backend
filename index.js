@@ -108,7 +108,7 @@ app.post('/check-and-book', async (req, res) => {
       phone,
       name,
       title:            service,
-      appointmentStatus: 'unconfirmed',
+      status: 'unconfirmed',
       ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
     };
 
