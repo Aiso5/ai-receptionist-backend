@@ -26,8 +26,8 @@ const {
   GHL_TYPE_LASER_HAIR_REMOVAL_ID
 } = process.env;
 
-// Map service name → GHL Appointment Type ID
-const SERVICE_TYPE_IDS = {
+// Map service name → calendarId (use the IDs you gave me)
+const SERVICE_CAL_IDS = {
   "Microneedling":        "CVV5l5hW8oQj9fCvJRQ0",
   "Hydrafacial":          "I9kLB4y6IA6gjSRhoPkE",
   "IPL Acne Treatments":  "LsUJFSftNp3F7WPgX4mZ",
@@ -40,37 +40,15 @@ const SERVICE_TYPE_IDS = {
   "Laser Treatments":     "ztEI8IyOTmJL7uFzRgCu"
 };
 
-// Twilio SMS client
-const twilioClient = twilioLib(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-
-// Helpers
-function getTomorrowRange() {
-  const start = new Date();
-  start.setDate(start.getDate() + 1);
-  start.setHours(0,0,0,0);
-  const end = new Date(start);
-  end.setHours(23,59,59,999);
-  return { startMs: start.getTime(), endMs: end.getTime() };
-}
-function to24h(time12h) {
-  const [t, mod] = time12h.split(' ');
-  let [h, m] = t.split(':').map(Number);
-  if (mod==='PM' && h!==12) h+=12;
-  if (mod==='AM' && h===12) h=0;
-  return [String(h).padStart(2,'0'), String(m).padStart(2,'0')].join(':');
-}
-
-// quick health check
-app.get('/health', (req, res) => res.sendStatus(200));
-
 // 1) Booking → create GHL appointment
 app.post('/check-and-book', async (req, res) => {
   try {
     let { name, phone, date, time, service } = req.body;
     if (!service) return res.status(400).json({ status:'fail', message:'Missing service.' });
+
     service = service.trim();
-    const typeId = SERVICE_TYPE_IDS[service];
-    if (!typeId) return res.status(400).json({ status:'fail', message:`Unknown service: ${service}` });
+    const calendarId = SERVICE_CAL_IDS[service];
+    if (!calendarId) return res.status(400).json({ status:'fail', message:`Unknown service: ${service}` });
 
     // Normalize & validate
     if (Array.isArray(date)) date = date.join('');
@@ -81,22 +59,22 @@ app.post('/check-and-book', async (req, res) => {
     if (!name||!phone||!date||!time)
       return res.status(400).json({ status:'fail', message:'Missing fields.' });
     if (!dateRe.test(date))
-      return res.status(400).json({ status:'fail', message:'Date must be YYYY‑MM‑DD' });
+      return res.status(400).json({ status:'fail', message:'Date must be YYYY-MM-DD' });
     if (!timeRe.test(time))
       return res.status(400).json({ status:'fail', message:'Time must be H:MM AM/PM' });
 
     // Build ISO slot
     const [h24,min] = to24h(time).split(':');
-    const isoSlot    = `${date}T${h24}:${min}:00-05:00`;
+    const isoSlot   = `${date}T${h24}:${min}:00-05:00`;
 
-    // Fetch available slots
+    // Fetch available slots for this service’s calendar
     const startOfDay = new Date(`${date}T00:00:00-05:00`).getTime();
     const endOfDay   = new Date(`${date}T23:59:59-05:00`).getTime();
     const slotsRes = await axios.get(
       'https://rest.gohighlevel.com/v1/appointments/slots',
       {
         headers:{ Authorization:`Bearer ${GHL_API_KEY}` },
-        params: { calendarId:GHL_CALENDAR_ID, startDate:startOfDay, endDate:endOfDay }
+        params:{ calendarId, startDate:startOfDay, endDate:endOfDay }
       }
     );
     const daySlots = slotsRes.data[date]?.slots || [];
@@ -104,14 +82,13 @@ app.post('/check-and-book', async (req, res) => {
       return res.status(409).json({ status:'fail', message:'Selected time slot unavailable' });
     }
 
-    // Build booking payload (name + appointmentTypeId)
+    // Build booking payload (calendarId only)
     const bookPayload = {
-      calendarId:        GHL_CALENDAR_ID,
-      selectedTimezone:  'America/Chicago',
-      selectedSlot:      isoSlot,
+      calendarId,
+      selectedTimezone:'America/Chicago',
+      selectedSlot:   isoSlot,
       phone,
-      name,
-      appointmentTypeId: typeId
+      name
     };
 
     // 1a) Create the appointment
@@ -123,40 +100,51 @@ app.post('/check-and-book', async (req, res) => {
     const apptId = createRes.data.id;
     console.log('Created appointment:', createRes.data);
 
-    // 1b) Immediately flip to “new” (unconfirmed)
+    // 1b) Immediately flip to “new”
     await axios.put(
       `https://rest.gohighlevel.com/v1/appointments/${apptId}/status`,
-      { status: 'new' },
+      { status:'new' },
       { headers:{ Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
     );
 
-    return res.json({ status:'success', message:'Appointment booked.' });
+    res.json({ status:'success', message:'Appointment booked.' });
   } catch (err) {
     console.error('Booking error:', err.response?.data || err);
-    return res.status(500).json({ status:'error', message:'Booking failed.' });
+    res.status(500).json({ status:'error', message:'Booking failed.' });
   }
 });
+
 
 // 2) Send reminders → Bland calls
 app.post('/send-reminders', async (req, res) => {
   const hr = new Date().getHours();
-  if (hr<9 || hr>=18) return res.status(429).send('Outside call window');
+  if (hr < 9 || hr >= 18) return res.status(429).send('Outside call window');
+
   try {
-    const { startMs,endMs } = getTomorrowRange();
-    const listRes = await axios.get(
-      'https://rest.gohighlevel.com/v1/appointments/',
-      {
-        headers:{ Authorization:`Bearer ${GHL_API_KEY}` },
-        params:{ startDate:startMs, endDate:endMs, calendarId:GHL_CALENDAR_ID, includeAll:true }
-      }
-    );
-    for (const a of listRes.data.appointments || []) {
-      if (!['new','booked','confirmed'].includes(a.status)) continue;
+    const { startMs, endMs } = getTomorrowRange();
+
+    // fetch appointments for every service-specific calendar
+    const allAppts = [];
+    for (const calId of Object.values(SERVICE_CAL_IDS)) {
+      const listRes = await axios.get(
+        'https://rest.gohighlevel.com/v1/appointments/',
+        {
+          headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+          params:  { startDate: startMs, endDate: endMs, calendarId: calId, includeAll: true }
+        }
+      );
+      allAppts.push(...(listRes.data.appointments || []));
+    }
+
+    for (const a of allAppts) {
+      if (!['new', 'booked', 'confirmed'].includes(a.status)) continue;
       const phone = a.contact?.phone || a.phone;
       if (!phone) continue;
+
       const when = new Date(a.startTime)
-                    .toLocaleTimeString('en-US',{hour:'numeric',minute:'numeric',hour12:true});
-      const task = `Hi ${a.title} patient, this is Mia confirming your ${a.title} tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
+                     .toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+      const task = `Hi ${a.title || 'patient'}, this is Mia confirming your ${a.title} tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
+
       await axios.post(
         'https://api.bland.ai/v1/calls',
         {
@@ -166,20 +154,19 @@ app.post('/send-reminders', async (req, res) => {
           callback_url:    `${BASE_URL}/handle-confirmation?appointmentId=${a.id}`,
           status_callback: `${BASE_URL}/call-status`
         },
-        { headers:{ Authorization:`Bearer ${BLAND_API_KEY}` } }
+        { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } }
       );
-      fs.appendFileSync(
-        'call-log.json',
-        JSON.stringify({ ts:new Date().toISOString(), event:'call-sent', phone }) + '\n'
-      );
+
+      fs.appendFileSync('call-log.json',
+        JSON.stringify({ ts: new Date().toISOString(), event: 'call-sent', phone }) + '\n');
     }
+
     res.send('Outbound calls scheduled.');
   } catch (err) {
-    console.error('Reminder error:', err.response?.data||err);
+    console.error('Reminder error:', err.response?.data || err);
     res.status(500).send('Failed to send reminders');
   }
 });
-
 // 3) Handle confirmation replies → patch by appointmentId
 app.post('/handle-confirmation', async (req, res) => {
   try {
