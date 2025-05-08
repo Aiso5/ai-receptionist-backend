@@ -53,10 +53,6 @@ const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 app.post('/check-and-book', async (req, res) => {
   try {
     let { name, phone, date, time, service } = req.body;
-
-    // log raw date for debugging
-    console.log('Incoming date:', JSON.stringify(date));
-
     if (!service) {
       return res.status(400).json({ status:'fail', message:'Missing service.' });
     }
@@ -66,18 +62,13 @@ app.post('/check-and-book', async (req, res) => {
       return res.status(400).json({ status:'fail', message:`Unknown service: ${service}` });
     }
 
-    // Normalize
+    // Normalize & validate date/time
     if (Array.isArray(date)) date = date.join('');
     if (Array.isArray(time)) time = time.join('');
     date = date.trim();
     time = time.trim();
-
-    // Correct, single‑backslash regex!
     const dateRe = /^\d{4}-\d{2}-\d{2}$/,
           timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
-
-    console.log('Date matches?', dateRe.test(date), 'Time matches?', timeRe.test(time));
-
     if (!name || !phone || !date || !time) {
       return res.status(400).json({ status:'fail', message:'Missing fields.' });
     }
@@ -88,40 +79,38 @@ app.post('/check-and-book', async (req, res) => {
       return res.status(400).json({ status:'fail', message:'Time must be H:MM AM/PM' });
     }
 
-    // Build ISO times
+    // Build ISO slot string
     const [h24, min] = to24h(time).split(':');
-    const startISO   = `${date}T${h24}:${min}:00-05:00`;
-    const endISO     = new Date(new Date(startISO).getTime() + 30*60*1000)
-                         .toISOString().replace('.000Z','-05:00');
+    const isoSlot     = `${date}T${h24}:${min}:00-05:00`;
 
-    const payload = {
+    // Build the booking payload for a service_booking calendar
+    const bookPayload = {
       calendarId,
-      meetingLocationType:   "custom",
-      meetingLocationId:     "default",
-      appointmentStatus:     "new",
+      selectedTimezone:          'America/Chicago',
+      selectedSlot:              isoSlot,
+      appointmentStatus:         'new',
       name,
       phone,
-      startTime:             startISO,
-      endTime:               endISO,
-      ignoreFreeSlotValidation: true
+      ignoreFreeSlotValidation:  true
     };
 
-    console.log('Booking payload:', payload);
+    console.log('Booking payload:', bookPayload);
 
+    // Create the appointment
     const createRes = await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
-      payload,
-      { headers:{ Authorization:`Bearer ${GHL_API_KEY}` } }
+      bookPayload,
+      { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
     );
-
     console.log('Created appointment:', createRes.data);
 
-    res.json({ status:'success', id:createRes.data.id });
+    return res.json({ status:'success', id:createRes.data.id });
   } catch (err) {
     console.error('Booking error:', err.response?.data || err);
-    res.status(500).json({ status:'error', message:'Booking failed.' });
+    return res.status(500).json({ status:'error', message:'Booking failed.' });
   }
 });
+
 // ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req,res)=>{
   const hr=new Date().getHours();
