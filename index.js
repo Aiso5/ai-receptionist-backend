@@ -28,13 +28,13 @@ const {
 
 // Map service name → GHL Appointment Type ID
 const SERVICE_TYPE_IDS = {
-  "Microneedling":        GHL_TYPE_MICRONEEDLING_ID,
-  "Hydrafacial":          GHL_TYPE_FACIAL_ID,
+  "Microneedling":        "CVV5l5hW8oQj9fCvJRQ0",
+  "Hydrafacial":          "I9kLB4y6IA6gjSRhoPkE",
   "IPL Acne Treatments":  "LsUJFSftNp3F7WPgX4mZ",
   "Press Files":          "Xo5vCcfx6bWIVykhPbsH",
-  "Body Contouring":      GHL_TYPE_BODYCONTOURING_ID,
-  "PRP Injections":       GHL_TYPE_PRP_INJECTIONS_ID,
-  "Laser Hair Removal":   GHL_TYPE_LASER_HAIR_REMOVAL_ID,
+  "Body Contouring":      "atRqPW5SeTiOXwDx8VZx",
+  "PRP Injections":       "hm9zPDrD0kh86uVaZDwW",
+  "Laser Hair Removal":   "nddmesx61WaFpfrQR3ut",
   "Fillers":              "xdyndm4rMsTvh48CLRjd",
   "Body Multi Shape":     "fcs6WN0rroebbG97bitr",
   "Laser Treatments":     "ztEI8IyOTmJL7uFzRgCu"
