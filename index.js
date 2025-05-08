@@ -82,14 +82,24 @@ app.post('/check-and-book', async (req, res) => {
       return res.status(409).json({ status:'fail', message:'Selected time slot unavailable' });
     }
 
-    // Build booking payload (calendarId only)
-    const bookPayload = {
-      calendarId,
-      selectedTimezone:'America/Chicago',
-      selectedSlot:   isoSlot,
-      phone,
-      name
-    };
+   // Build startTime / endTime (30-minute default)
+const startISO = isoSlot;
+const endISO   = new Date(new Date(isoSlot).getTime() + 30*60*1000)
+                   .toISOString().replace('.000Z', '-05:00');
+
+// Build booking payload for a stand-alone calendar
+const bookPayload = {
+  calendarId:           calendarId,
+  meetingLocationType:  "custom",
+  meetingLocationId:    "default",
+  appointmentStatus:    "new",
+  name,
+  phone,
+  startTime:            startISO,
+  endTime:              endISO,
+  ignoreFreeSlotValidation: false
+};
+
 
     // 1a) Create the appointment
     const createRes = await axios.post(
