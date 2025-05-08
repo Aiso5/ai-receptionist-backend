@@ -100,15 +100,15 @@ app.post('/check-and-book', async (req, res) => {
       return res.status(409).json({ status: 'fail', message: 'Selected time slot unavailable' });
     }
 
-    // Build booking payload
+    // Build booking payload (status: 'unconfirmed' ensures it’s not auto‑confirmed)
     const bookPayload = {
       calendarId:       GHL_CALENDAR_ID,
       selectedTimezone: 'America/Chicago',
       selectedSlot:     isoSlot,
+      status:           'unconfirmed',      // ← correct field for initial state
       phone,
       name,
       title:            service,
-      status: 'unconfirmed',
       ...(SERVICE_TYPE_IDS[service] && { appointmentTypeId: SERVICE_TYPE_IDS[service] })
     };
 
