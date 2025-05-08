@@ -75,11 +75,11 @@ app.post('/check-and-book', async (req, res) => {
     date = date.trim(); time = time.trim();
     const dateRe = /^\d{4}-\d{2}-\d{2}$/,
           timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
-    if (!name||!phone||!date||!time) 
+    if (!name||!phone||!date||!time)
       return res.status(400).json({ status:'fail', message:'Missing fields.' });
-    if (!dateRe.test(date)) 
+    if (!dateRe.test(date))
       return res.status(400).json({ status:'fail', message:'Date must be YYYY‑MM‑DD' });
-    if (!timeRe.test(time)) 
+    if (!timeRe.test(time))
       return res.status(400).json({ status:'fail', message:'Time must be H:MM AM/PM' });
 
     // Build ISO slot
@@ -92,8 +92,8 @@ app.post('/check-and-book', async (req, res) => {
     const slotsRes = await axios.get(
       'https://rest.gohighlevel.com/v1/appointments/slots',
       {
-        headers: { Authorization:`Bearer ${GHL_API_KEY}` },
-        params:  { calendarId:GHL_CALENDAR_ID, startDate:startOfDay, endDate:endOfDay }
+        headers:{ Authorization:`Bearer ${GHL_API_KEY}` },
+        params: { calendarId:GHL_CALENDAR_ID, startDate:startOfDay, endDate:endOfDay }
       }
     );
     const daySlots = slotsRes.data[date]?.slots || [];
@@ -101,19 +101,13 @@ app.post('/check-and-book', async (req, res) => {
       return res.status(409).json({ status:'fail', message:'Selected time slot unavailable' });
     }
 
-    // Split name into first/last
-    const [firstName, ...rest] = name.trim().split(' ');
-    const lastName = rest.join(' ');
-
-    // Build create-payload (omit status here)
+    // Build booking payload (name + appointmentTypeId)
     const bookPayload = {
       calendarId:        GHL_CALENDAR_ID,
       selectedTimezone:  'America/Chicago',
       selectedSlot:      isoSlot,
-      firstName,
-      lastName,
       phone,
-      title:             service,
+      name,
       appointmentTypeId: typeId
     };
 
@@ -121,9 +115,10 @@ app.post('/check-and-book', async (req, res) => {
     const createRes = await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
       bookPayload,
-      { headers: { Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
+      { headers:{ Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
     );
     const apptId = createRes.data.id;
+    console.log('Created appointment:', createRes.data);
 
     // 1b) Immediately flip to “new” (unconfirmed)
     await axios.put(
