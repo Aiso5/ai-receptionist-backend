@@ -54,12 +54,12 @@ app.post('/check-and-book', async (req, res) => {
   try {
     let { name, phone, date, time, service } = req.body;
     if (!service) {
-      return res.status(400).json({ status:'fail', message:'Missing service.' });
+      return res.status(400).json({ status: 'fail', message: 'Missing service.' });
     }
     service = service.trim();
     const calendarId = SERVICE_CAL_IDS[service];
     if (!calendarId) {
-      return res.status(400).json({ status:'fail', message:`Unknown service: ${service}` });
+      return res.status(400).json({ status: 'fail', message: `Unknown service: ${service}` });
     }
 
     // Normalize & validate date/time
@@ -70,44 +70,46 @@ app.post('/check-and-book', async (req, res) => {
     const dateRe = /^\d{4}-\d{2}-\d{2}$/,
           timeRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
     if (!name || !phone || !date || !time) {
-      return res.status(400).json({ status:'fail', message:'Missing fields.' });
+      return res.status(400).json({ status: 'fail', message: 'Missing fields.' });
     }
     if (!dateRe.test(date)) {
-      return res.status(400).json({ status:'fail', message:'Date must be YYYY-MM-DD' });
+      return res.status(400).json({ status: 'fail', message: 'Date must be YYYY-MM-DD' });
     }
     if (!timeRe.test(time)) {
-      return res.status(400).json({ status:'fail', message:'Time must be H:MM AM/PM' });
+      return res.status(400).json({ status: 'fail', message: 'Time must be H:MM AM/PM' });
     }
 
     // Build ISO slot string
     const [h24, min] = to24h(time).split(':');
-    const isoSlot     = `${date}T${h24}:${min}:00-05:00`;
+    const isoSlot = `${date}T${h24}:${min}:00-05:00`;
 
     // Build the booking payload for a service_booking calendar
     const bookPayload = {
       calendarId,
-      selectedTimezone:          'America/Chicago',
-      selectedSlot:              isoSlot,
-      appointmentStatus:         'new',
-      name,
-      phone,
-      ignoreFreeSlotValidation:  true
+      timezone: 'America/Chicago',
+      slot: isoSlot,
+      status: 'new',
+      contact: {
+        name,
+        phone
+      },
+      ignoreAvailability: true
     };
 
     console.log('Booking payload:', bookPayload);
 
-    // Create the appointment
+    // Create the appointment using v2 API
     const createRes = await axios.post(
-      'https://rest.gohighlevel.com/v1/appointments/',
+      'https://rest.gohighlevel.com/v2/appointments',
       bookPayload,
       { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
     );
     console.log('Created appointment:', createRes.data);
 
-    return res.json({ status:'success', id:createRes.data.id });
+    return res.json({ status: 'success', id: createRes.data.id });
   } catch (err) {
     console.error('Booking error:', err.response?.data || err);
-    return res.status(500).json({ status:'error', message:'Booking failed.' });
+    return res.status(500).json({ status: 'error', message: 'Booking failed.' });
   }
 });
 
