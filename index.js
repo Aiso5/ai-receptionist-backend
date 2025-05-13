@@ -22,16 +22,15 @@ const {
 
 // ─── SERVICE → CALENDAR MAP ────────────────────────────────────────────
 const SERVICE_CAL_IDS = {
-  "Microneedling":        "CVV5l5hW8oQj9fCvJRQ0",
-  "Hydrafacial":          "I9kLB4y6IA6gjSRhoPkE",
-  "IPL Acne Treatments":  "LsUJFSftNp3F7WPgX4mZ",
-  "Press Files":          "Xo5vCcfx6bWIVykhPbsH",
-  "Body Contouring":      "atRqPW5SeTiOXwDx8VZx",
-  "PRP Injections":       "hm9zPDrD0kh86uVaZDwW",
-  "Laser Hair Removal":   "nddmesx61WaFpfrQR3ut",
-  "Fillers":              "xdyndm4rMsTvh48CLRjd",
-  "Body Multi Shape":     "fcs6WN0rroebbG97bitr",
-  "Laser Treatments":     "ztEI8IyOTmJL7uFzRgCu"
+  "Microneedling":        "CVV5l5hW8oQj9fCvJRQ0", // Replace with correct ID
+  "Hydrafacial":          "I9kLB4y6IA6gjSRhoPkE", // Replace with correct ID
+  "IPL Acne Treatments":  "LsUJFSftNp3F7WPgX4mZ", // Replace with correct ID
+  "Press Files":          "Xo5vCcfx6bWIVykhPbsH", // Replace with correct ID
+  "Body Contouring":      "atRqPW5SeTiOXwDx8VZx", // Replace with correct ID
+  "PRP Injections":       "hm9zPDrD0kh86uVaZDwW", // Replace with correct ID
+  "Laser Hair Removal":   "nddmesx61WaFpfrQR3ut", // Replace with correct ID
+  "Fillers":              "xdyndm4rMsTvh48CLRjd", // Replace with correct ID
+  "Body Multi Shape":     "fcs6WN0rroebbG97bitr", // Replace with correct ID
 };
 
 // ─── HELPERS ───────────────────────────────────────────────────────────
