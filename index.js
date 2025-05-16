@@ -95,6 +95,7 @@ app.post('/check-and-book', async (req, res) => {
 
 // ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req, res) => {
+  console.log('▶️ /send-reminders body:', JSON.stringify(req.body));
   const hr = new Date().getHours();
   if (hr < 9 || hr >= 18) return res.status(429).send('Outside call window');
 
@@ -103,33 +104,32 @@ app.post('/send-reminders', async (req, res) => {
     let appts = [];
 
     if (apptId) {
-      // single appointment
       const r = await axios.get(
         `https://rest.gohighlevel.com/v1/appointments/${apptId}`,
-        { headers:{ Authorization:`Bearer ${GHL_API_KEY}` } }
+        { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
       );
-      appts = [ r.data ];
+      appts = [r.data];
     } else {
-      // all tomorrow’s
       const { startMs, endMs } = getTomorrowRange();
       const listRes = await axios.get(
         'https://rest.gohighlevel.com/v1/appointments/',
         {
-          headers:{ Authorization:`Bearer ${GHL_API_KEY}` },
-          params: { calendarId: GHL_CALENDAR_ID, startDate:startMs, endDate:endMs }
+          headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+          params:  { calendarId: GHL_CALENDAR_ID, startDate: startMs, endDate: endMs }
         }
       );
       appts = listRes.data.appointments || [];
     }
 
     for (const a of appts) {
-      if (a.appointmentStatus !== 'booked') continue;
+      if (!['new','booked'].includes(a.appointmentStatus)) continue;
       const phone = a.contact?.phone || a.phone;
       if (!phone) continue;
 
-      const when = new Date(a.startTime)
-        .toLocaleTimeString('en-US',{ hour:'numeric', minute:'numeric', hour12:true });
+      console.log(` ☎️ dialing for appt ${a.id} (status=${a.appointmentStatus}) at ${phone}`);
 
+      const when = new Date(a.startTime)
+        .toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
       const task = `Hi! this is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
 
       await axios.post(
@@ -141,17 +141,17 @@ app.post('/send-reminders', async (req, res) => {
           callback_url:   `${BASE_URL}/handle-confirmation?appt=${a.id}`,
           status_callback:`${BASE_URL}/call-status`
         },
-        { headers:{ Authorization:`Bearer ${BLAND_API_KEY}` } }
+        { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } }
       );
 
       fs.appendFileSync('call-log.json',
-        JSON.stringify({ ts:new Date().toISOString(), event:'call-sent', phone, apptId:a.id }) + '\n'
+        JSON.stringify({ ts: new Date().toISOString(), event: 'call-sent', phone, apptId: a.id }) + '\n'
       );
     }
 
     res.send('Reminders sent.');
-  } catch(err) {
-    console.error('Reminder error:', err.response?.data||err);
+  } catch (err) {
+    console.error('Reminder error:', err.response?.data || err);
     res.status(500).send('Failed to send reminders');
   }
 });
