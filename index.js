@@ -84,7 +84,7 @@ app.post('/check-and-book', async (req,res) => {
       { headers:{ Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
     );
 
-    return res.json({ status:'success', message:'Appointment booked.' });
+    return res.json({ status:'success', id: createRes.data.id });
   } catch(err) {
     console.error('Booking error:', err.response?.data||err);
     return res.status(500).json({ status:'error', message:'Booking failed.' });
