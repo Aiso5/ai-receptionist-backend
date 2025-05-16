@@ -93,24 +93,38 @@ app.post('/check-and-book', async (req, res) => {
   }
 });
 
-// 2) SEND REMINDERS → call every tomorrow’s appointment not yet confirmed
+// ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req, res) => {
-  // only during business hours
+  const force = req.query.force === 'true';
+  const testToday = req.query.today === 'true';
+
+  // 1) business‑hours guard (unless forced)
   const hour = new Date().getHours();
-  if (hour < 9 || hour >= 18) {
+  if (!force && (hour < 9 || hour >= 18)) {
     return res.status(429).send('Outside call window');
   }
 
   try {
-    // 1) figure out tomorrow’s start/end
-    const { startMs, endMs } = getTomorrowRange();
+    // 2) pick the date range: today (if testing) or tomorrow
+    let startMs, endMs;
+    if (testToday) {
+      const start = new Date();
+      start.setHours(0,0,0,0);
+      const end = new Date();
+      end.setHours(23,59,59,999);
+      startMs = start.getTime();
+      endMs   = end.getTime();
+      console.log('🔬 Testing mode → using TODAY range');
+    } else {
+      ({ startMs, endMs } = getTomorrowRange());
+    }
 
-    // 2) fetch every appointment in that window
+    // 3) fetch all appts in that window
     const listRes = await axios.get(
       'https://rest.gohighlevel.com/v1/appointments/',
       {
         headers: { Authorization: `Bearer ${GHL_API_KEY}` },
-        params: {
+        params:  {
           calendarId: GHL_CALENDAR_ID,
           startDate:  startMs,
           endDate:    endMs,
@@ -119,28 +133,28 @@ app.post('/send-reminders', async (req, res) => {
       }
     );
 
-    // 3) filter out those already confirmed
+    // 4) filter out already confirmed
     const toCall = (listRes.data.appointments || [])
       .filter(a => a.appointmentStatus !== 'confirmed');
 
-    console.log(`Found ${toCall.length} appointments to confirm:`);
+    console.log(`📞 Sending ${toCall.length} reminders${testToday?' (today)':''}${force?' (forced)':''}`);
 
-    // 4) place a call for each
+    // 5) dispatch calls
     for (const appt of toCall) {
       const phone = appt.contact?.phone || appt.phone;
       if (!phone) continue;
 
       const when = new Date(appt.startTime)
-        .toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
+        .toLocaleTimeString('en-US',{hour:'numeric',minute:'numeric',hour12:true});
 
-      console.log(`→ calling ${phone} for appt ${appt.id} at ${when}`);
+      console.log(`→ calling ${phone} (appt ${appt.id}) at ${when}`);
 
       await axios.post(
         'https://api.bland.ai/v1/calls',
         {
           phone_number:   phone,
           voice:          'June',
-          task:           `Hi, this is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`,
+          task:           `Hi, this is Mia confirming your appointment today at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`,
           callback_url:   `${BASE_URL}/handle-confirmation?appt=${appt.id}`,
           status_callback:`${BASE_URL}/call-status`
         },
@@ -148,7 +162,7 @@ app.post('/send-reminders', async (req, res) => {
       );
 
       fs.appendFileSync('call-log.json',
-        JSON.stringify({ ts: new Date().toISOString(), event: 'call-sent', phone, apptId: appt.id }) + '\n'
+        JSON.stringify({ ts:new Date().toISOString(),event:'call-sent',phone,apptId:appt.id }) + '\n'
       );
     }
 
@@ -158,6 +172,7 @@ app.post('/send-reminders', async (req, res) => {
     res.status(500).send('Failed to send reminders');
   }
 });
+
 
 
 // ─── 3) HANDLE CONFIRMATION ────────────────────────────────────────────
