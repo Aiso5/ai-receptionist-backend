@@ -93,68 +93,72 @@ app.post('/check-and-book', async (req, res) => {
   }
 });
 
-// ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
+// 2) SEND REMINDERS → call every tomorrow’s appointment not yet confirmed
 app.post('/send-reminders', async (req, res) => {
-  console.log('▶️ /send-reminders body:', JSON.stringify(req.body));
-  const hr = new Date().getHours();
-  if (hr < 9 || hr >= 18) return res.status(429).send('Outside call window');
+  // only during business hours
+  const hour = new Date().getHours();
+  if (hour < 9 || hour >= 18) {
+    return res.status(429).send('Outside call window');
+  }
 
   try {
-    const apptId = req.body.appointmentId;
-    let appts = [];
+    // 1) figure out tomorrow’s start/end
+    const { startMs, endMs } = getTomorrowRange();
 
-    if (apptId) {
-      const r = await axios.get(
-        `https://rest.gohighlevel.com/v1/appointments/${apptId}`,
-        { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
-      );
-      appts = [r.data];
-    } else {
-      const { startMs, endMs } = getTomorrowRange();
-      const listRes = await axios.get(
-        'https://rest.gohighlevel.com/v1/appointments/',
-        {
-          headers: { Authorization: `Bearer ${GHL_API_KEY}` },
-          params:  { calendarId: GHL_CALENDAR_ID, startDate: startMs, endDate: endMs }
+    // 2) fetch every appointment in that window
+    const listRes = await axios.get(
+      'https://rest.gohighlevel.com/v1/appointments/',
+      {
+        headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+        params: {
+          calendarId: GHL_CALENDAR_ID,
+          startDate:  startMs,
+          endDate:    endMs,
+          includeAll: true
         }
-      );
-      appts = listRes.data.appointments || [];
-    }
+      }
+    );
 
-    for (const a of appts) {
-      if (!['new','booked'].includes(a.appointmentStatus)) continue;
-      const phone = a.contact?.phone || a.phone;
+    // 3) filter out those already confirmed
+    const toCall = (listRes.data.appointments || [])
+      .filter(a => a.appointmentStatus !== 'confirmed');
+
+    console.log(`Found ${toCall.length} appointments to confirm:`);
+
+    // 4) place a call for each
+    for (const appt of toCall) {
+      const phone = appt.contact?.phone || appt.phone;
       if (!phone) continue;
 
-      console.log(` ☎️ dialing for appt ${a.id} (status=${a.appointmentStatus}) at ${phone}`);
-
-      const when = new Date(a.startTime)
+      const when = new Date(appt.startTime)
         .toLocaleTimeString('en-US', { hour: 'numeric', minute: 'numeric', hour12: true });
-      const task = `Hi! this is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
+
+      console.log(`→ calling ${phone} for appt ${appt.id} at ${when}`);
 
       await axios.post(
         'https://api.bland.ai/v1/calls',
         {
           phone_number:   phone,
           voice:          'June',
-          task,
-          callback_url:   `${BASE_URL}/handle-confirmation?appt=${a.id}`,
+          task:           `Hi, this is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`,
+          callback_url:   `${BASE_URL}/handle-confirmation?appt=${appt.id}`,
           status_callback:`${BASE_URL}/call-status`
         },
         { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } }
       );
 
       fs.appendFileSync('call-log.json',
-        JSON.stringify({ ts: new Date().toISOString(), event: 'call-sent', phone, apptId: a.id }) + '\n'
+        JSON.stringify({ ts: new Date().toISOString(), event: 'call-sent', phone, apptId: appt.id }) + '\n'
       );
     }
 
-    res.send('Reminders sent.');
+    res.send(`Scheduled ${toCall.length} reminder calls.`);
   } catch (err) {
     console.error('Reminder error:', err.response?.data || err);
     res.status(500).send('Failed to send reminders');
   }
 });
+
 
 // ─── 3) HANDLE CONFIRMATION ────────────────────────────────────────────
 app.post('/handle-confirmation', async (req, res) => {
