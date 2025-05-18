@@ -94,84 +94,80 @@ app.post('/check-and-book', async (req, res) => {
 });
 
 // ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
+// ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req, res) => {
-  const force = req.query.force === 'true';
-  const testToday = req.query.today === 'true';
-
-  // 1) business‑hours guard (unless forced)
-  const hour = new Date().getHours();
-  if (!force && (hour < 9 || hour >= 18)) {
-    return res.status(429).send('Outside call window');
-  }
-
   try {
-    // 2) pick the date range: today (if testing) or tomorrow
-    let startMs, endMs;
-    if (testToday) {
-      const start = new Date();
-      start.setHours(0,0,0,0);
-      const end = new Date();
-      end.setHours(23,59,59,999);
-      startMs = start.getTime();
-      endMs   = end.getTime();
-      console.log('🔬 Testing mode → using TODAY range');
-    } else {
-      ({ startMs, endMs } = getTomorrowRange());
+    // (Optional) override outside 9–18 if you attach ?force=true
+    const hr = new Date().getHours();
+    if (!req.query.force && (hr < 9 || hr >= 18)) {
+      return res.status(429).send('Outside call window');
     }
 
-    // 3) fetch all appts in that window
-    const listRes = await axios.get(
-      'https://rest.gohighlevel.com/v1/appointments/',
-      {
-        headers: { Authorization: `Bearer ${GHL_API_KEY}` },
-        params:  {
-          calendarId: GHL_CALENDAR_ID,
-          startDate:  startMs,
-          endDate:    endMs,
-          includeAll: true
+    // 1) Single appointment from webhook?
+    let appts = [];
+    if (req.body.appointmentId) {
+      const { data } = await axios.get(
+        `https://rest.gohighlevel.com/v1/appointments/${req.body.appointmentId}`,
+        { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
+      );
+      appts = [data];
+    } else {
+      // 2) Otherwise list tomorrow’s (or today’s) appointments
+      const { startMs, endMs } = req.query.today
+        ? getTodayRange()
+        : getTomorrowRange();
+
+      const listRes = await axios.get(
+        'https://rest.gohighlevel.com/v1/appointments/',
+        {
+          headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+          params: {
+            calendarId: GHL_CALENDAR_ID,
+            startDate:  startMs,
+            endDate:    endMs
+          }
         }
-      }
-    );
+      );
+      appts = listRes.data.appointments || [];
+    }
 
-    // 4) filter out already confirmed
-    const toCall = (listRes.data.appointments || [])
-      .filter(a => a.appointmentStatus !== 'confirmed');
-
-    console.log(`📞 Sending ${toCall.length} reminders${testToday?' (today)':''}${force?' (forced)':''}`);
-
-    // 5) dispatch calls
-    for (const appt of toCall) {
-      const phone = appt.contact?.phone || appt.phone;
+    // 3) Dial out for each appointment whose status is new or booked
+    let sent = 0;
+    for (const a of appts) {
+      if (!['new','booked'].includes(a.status)) continue;
+      const phone = a.contact?.phone || a.phone;
       if (!phone) continue;
 
-      const when = new Date(appt.startTime)
+      const when = new Date(a.startTime)
         .toLocaleTimeString('en-US',{hour:'numeric',minute:'numeric',hour12:true});
-
-      console.log(`→ calling ${phone} (appt ${appt.id}) at ${when}`);
+      const task = `Hi! This is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
 
       await axios.post(
         'https://api.bland.ai/v1/calls',
         {
-          phone_number:   phone,
-          voice:          'June',
-          task:           `Hi, this is Mia confirming your appointment today at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`,
-          callback_url:   `${BASE_URL}/handle-confirmation?appt=${appt.id}`,
-          status_callback:`${BASE_URL}/call-status`
+          phone_number:    phone,
+          voice:           'June',
+          task,
+          callback_url:    `${BASE_URL}/handle-confirmation?appt=${a.id}`,
+          status_callback: `${BASE_URL}/call-status`
         },
         { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } }
       );
 
+      sent++;
       fs.appendFileSync('call-log.json',
-        JSON.stringify({ ts:new Date().toISOString(),event:'call-sent',phone,apptId:appt.id }) + '\n'
+        JSON.stringify({ ts:new Date().toISOString(), event:'call-sent', phone, appt:a.id }) + '\n'
       );
     }
 
-    res.send(`Scheduled ${toCall.length} reminder calls.`);
+    console.log(`Scheduled ${sent} reminder calls`);
+    res.send(`Scheduled ${sent} reminder calls.`);
   } catch (err) {
     console.error('Reminder error:', err.response?.data || err);
     res.status(500).send('Failed to send reminders');
   }
 });
+
 
 
 
