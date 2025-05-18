@@ -37,6 +37,12 @@ function getTomorrowRange() {
   e.setDate(s.getDate());     e.setHours(23,59,59,999);
   return { startMs: s.getTime(), endMs: e.getTime() };
 }
+function getTodayRange() {
+  const s = new Date(), e = new Date();
+  s.setHours(0,0,0,0);
+  e.setHours(23,59,59,999);
+  return { startMs: s.getTime(), endMs: e.getTime() };
+}
 
 // ─── 1) BOOKING ───────────────────────────────────────────────────────
 app.post('/check-and-book', async (req, res) => {
@@ -76,7 +82,6 @@ app.post('/check-and-book', async (req, res) => {
 
     console.log('Booking payload:', payload);
 
-    // ← capture response here
     const createRes = await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
       payload,
@@ -84,8 +89,6 @@ app.post('/check-and-book', async (req, res) => {
     );
 
     console.log('Created appointment:', createRes.data);
-
-    // return the new ID
     return res.json({ status:'success', id: createRes.data.id });
   } catch(err) {
     console.error('Booking error:', err.response?.data||err);
@@ -94,10 +97,9 @@ app.post('/check-and-book', async (req, res) => {
 });
 
 // ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
-// ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req, res) => {
   try {
-    // (Optional) override outside 9–18 if you attach ?force=true
+    // 9–18 window, unless forced
     const hr = new Date().getHours();
     if (!req.query.force && (hr < 9 || hr >= 18)) {
       return res.status(429).send('Outside call window');
@@ -112,34 +114,47 @@ app.post('/send-reminders', async (req, res) => {
       );
       appts = [data];
     } else {
-      // 2) Otherwise list tomorrow’s (or today’s) appointments
-      const { startMs, endMs } = req.query.today
-        ? getTodayRange()
+      // 2) Otherwise list tomorrow’s (or today’s)
+      const range = req.query.today 
+        ? getTodayRange() 
         : getTomorrowRange();
 
       const listRes = await axios.get(
         'https://rest.gohighlevel.com/v1/appointments/',
         {
           headers: { Authorization: `Bearer ${GHL_API_KEY}` },
-          params: {
+          params:  {
             calendarId: GHL_CALENDAR_ID,
-            startDate:  startMs,
-            endDate:    endMs
+            startDate:  range.startMs,
+            endDate:    range.endMs
           }
         }
       );
       appts = listRes.data.appointments || [];
     }
 
-    // 3) Dial out for each appointment whose status is new or booked
+    // debug log
+    console.log(`Found ${appts.length} appointments:`,
+      appts.map(a => ({
+        id:        a.id,
+        status:    a.appointmentStatus || a.status,
+        startTime: a.startTime,
+        phone:     a.contact?.phone || a.phone
+      }))
+    );
+
+    // 3) Dial out for each “new” or “booked”
     let sent = 0;
     for (const a of appts) {
-      if (!['new','booked'].includes(a.status)) continue;
+      const st = a.appointmentStatus || a.status;
+      if (!['new','booked'].includes(st)) continue;
+
       const phone = a.contact?.phone || a.phone;
       if (!phone) continue;
 
       const when = new Date(a.startTime)
         .toLocaleTimeString('en-US',{hour:'numeric',minute:'numeric',hour12:true});
+
       const task = `Hi! This is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
 
       await axios.post(
@@ -156,20 +171,17 @@ app.post('/send-reminders', async (req, res) => {
 
       sent++;
       fs.appendFileSync('call-log.json',
-        JSON.stringify({ ts:new Date().toISOString(), event:'call-sent', phone, appt:a.id }) + '\n'
+        JSON.stringify({ ts:new Date().toISOString(), event:'call-sent', phone, apptId:a.id }) + '\n'
       );
     }
 
     console.log(`Scheduled ${sent} reminder calls`);
-    res.send(`Scheduled ${sent} reminder calls.`);
+    return res.send(`Scheduled ${sent} reminder calls.`);
   } catch (err) {
     console.error('Reminder error:', err.response?.data || err);
-    res.status(500).send('Failed to send reminders');
+    return res.status(500).send('Failed to send reminders');
   }
 });
-
-
-
 
 // ─── 3) HANDLE CONFIRMATION ────────────────────────────────────────────
 app.post('/handle-confirmation', async (req, res) => {
@@ -177,17 +189,17 @@ app.post('/handle-confirmation', async (req, res) => {
     const id = req.query.appt;
     if (!id) return res.status(400).send('Missing appt');
     const resp = (req.body.confirmation||'').trim().toLowerCase();
-    const status = resp==='yes' ? 'confirmed' : 'cancelled';
+    const status = resp === 'yes' ? 'confirmed' : 'cancelled';
 
     await axios.put(
       `https://rest.gohighlevel.com/v1/appointments/${id}/status`,
       { status },
       { headers:{ Authorization:`Bearer ${GHL_API_KEY}` } }
     );
-    res.sendStatus(200);
+    return res.sendStatus(200);
   } catch(err) {
-    console.error('Confirm error:', err.response?.data||err);
-    res.status(500).send('Confirmation failed');
+    console.error('Confirm error:', err.response?.data || err);
+    return res.status(500).send('Confirmation failed');
   }
 });
 
@@ -202,13 +214,13 @@ app.post('/call-status', async (req, res) => {
         body:'We couldn’t reach you. Reply YES to confirm, NO to cancel, RESCHEDULE to change.'
       });
     }
-    res.sendStatus(200);
+    return res.sendStatus(200);
   } catch(err) {
     console.error('Call-status error:', err);
-    res.status(500).send('Call-status failed');
+    return res.status(500).send('Call-status failed');
   }
 });
 
 // ─── START SERVER ─────────────────────────────────────────────────────
-const PORT = process.env.PORT||3000;
-app.listen(PORT, () => console.log(`Server on ${PORT}`));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server on port ${PORT}`));
