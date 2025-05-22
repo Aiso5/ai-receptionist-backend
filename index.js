@@ -90,51 +90,64 @@ app.post('/check-and-book', async (req, res) => {
 // ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req, res) => {
   try {
+    // allow forcing outside hours
     const hr = new Date().getHours();
-    if (!req.query.force && (hr < 9 || hr >= 18)) 
+    if (!req.query.force && (hr < 9 || hr >= 18)) {
       return res.status(429).send('Outside call window');
+    }
 
+    // build appointment list (either 1 or all tomorrow’s)
     let appts = [];
     if (req.body.appointmentId) {
-      // if GHL automation passed us a single ID
       const { data } = await axios.get(
         `https://rest.gohighlevel.com/v1/appointments/${req.body.appointmentId}`,
-        { headers:{ Authorization:`Bearer ${GHL_API_KEY}` } }
+        { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
       );
-      appts = [data];
+      appts = [ data ];
     } else {
       const { startMs, endMs } = getTomorrowRange();
       const listRes = await axios.get(
         'https://rest.gohighlevel.com/v1/appointments/',
         {
-          headers:{ Authorization:`Bearer ${GHL_API_KEY}` },
-          params:{ calendarId:GHL_CALENDAR_ID, startDate:startMs, endDate:endMs }
+          headers: { Authorization: `Bearer ${GHL_API_KEY}` },
+          params:  {
+            calendarId: GHL_CALENDAR_ID,
+            startDate:  startMs,
+            endDate:    endMs
+          }
         }
       );
       appts = listRes.data.appointments || [];
     }
 
+    // debug: print what we fetched
+    console.log(`Fetched ${appts.length} appointment(s) for reminders:`, appts);
+
+    // dial out for any that are still “new” or “booked”
     let sent = 0;
     for (const a of appts) {
-      if (a.appointmentStatus !== 'booked') continue;
+      // look at either a.status or fallback
+      const st = a.status || a.appointmentStatus;
+      if (!['new','booked'].includes(st)) continue;
+
       const phone = a.contact?.phone || a.phone;
       if (!phone) continue;
 
       const when = new Date(a.startTime)
-        .toLocaleTimeString('en-US',{hour:'numeric',minute:'numeric',hour12:true});
+        .toLocaleTimeString('en-US', { hour:'numeric', minute:'numeric', hour12:true });
       const task = `Hi! this is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
 
-      console.log(`Dialing ${phone} for appt ${a.id}`);
+      console.log(`→ Sending call to ${phone} for appt ${a.id}`);
       await axios.post(
         'https://api.bland.ai/v1/calls',
         {
-          phone_number: phone,
-          voice:        'June',
+          phone_number:    phone,
+          voice:           'June',
           task,
-          callback_url: `${BASE_URL}/handle-confirmation?appt=${a.id}`,
-          status_callback:`${BASE_URL}/call-status`
+          callback_url:    `${BASE_URL}/handle-confirmation?appt=${a.id}`,
+          status_callback: `${BASE_URL}/call-status`
         },
-        { headers:{ Authorization:`Bearer ${BLAND_API_KEY}` } }
+        { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } }
       );
 
       sent++;
@@ -145,7 +158,7 @@ app.post('/send-reminders', async (req, res) => {
 
     console.log(`Scheduled ${sent} reminder calls`);
     res.send(`Scheduled ${sent} reminder calls.`);
-  } catch(err) {
+  } catch (err) {
     console.error('Reminder error:', err.response?.data || err);
     res.status(500).send('Failed to send reminders');
   }
