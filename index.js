@@ -164,6 +164,9 @@ app.post('/send-reminders', async (req, res) => {
 
 // ─── 3) HANDLE CONFIRMATION ────────────────────────────────────────────
 app.post('/handle-confirmation', async (req, res) => {
+  console.log('⬅️ Bland callback incoming:', req.method, req.originalUrl);
+  console.log('Headers:', req.headers);
+  console.log('Body:', req.body);
   console.log('🔔 /handle-confirmation hit:', { query: req.query, body: req.body });
   try {
     const id = req.query.appt;
