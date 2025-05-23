@@ -139,11 +139,11 @@ app.post('/send-reminders', async (req, res) => {
       await axios.post(
         'https://api.bland.ai/v1/calls',
         {
-          phone_number:    phone,
+          phoneNumber:    phone,
           voice:           'June',
           task,
-          callback_url:    `${BASE_URL}/handle-confirmation?appt=${a.id}`,
-          status_callback: `${BASE_URL}/call-status`
+          callbackUrl:    `${BASE_URL}/handle-confirmation?appt=${a.id}`,
+          statusCallback: `${BASE_URL}/call-status`
         },
         { headers:{ Authorization:`Bearer ${BLAND_API_KEY}` } }
       );
@@ -190,6 +190,7 @@ app.post('/handle-confirmation', async (req, res) => {
 
 // ─── 4) CALL-STATUS → SMS FALLBACK ────────────────────────────────────
 app.post('/call-status', async (req, res) => {
+  console.log('🔄 /call-status payload:', req.body);
   const { status, phone_number } = req.body;
   try {
     if (['no-answer','busy'].includes(status)) {
