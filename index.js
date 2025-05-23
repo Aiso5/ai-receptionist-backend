@@ -1,3 +1,4 @@
+// ai-receptionist-backend/index.js
 require('dotenv').config();
 const express    = require('express');
 const axios      = require('axios');
@@ -13,8 +14,8 @@ app.use(express.json());
 const {
   BLAND_API_KEY,
   BASE_URL,
-  GHL_API_KEY,
-  GHL_CALENDAR_ID,
+  GHL_API_KEY,       // v1 key
+  GHL_CALENDAR_ID,   // your “Schedule an Appointment” calendar ID
   TWILIO_ACCOUNT_SID,
   TWILIO_AUTH_TOKEN,
   TWILIO_PHONE_NUMBER
@@ -24,16 +25,16 @@ const twilioClient = twilioLib(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
 // ─── HELPERS ─────────────────────────────────────────────────────────
 function to24h(t12) {
-  const [t, mod] = t12.split(' ');
+  const [t,mod] = t12.split(' ');
   let [h,m] = t.split(':').map(Number);
   if (mod==='PM' && h!==12) h+=12;
   if (mod==='AM' && h===12) h=0;
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 function getTomorrowRange() {
-  const s = new Date(), e = new Date();
+  const s=new Date(), e=new Date();
   s.setDate(s.getDate()+1); s.setHours(0,0,0,0);
-  e.setDate(s.getDate());    e.setHours(23,59,59,999);
+  e.setDate(s.getDate());     e.setHours(23,59,59,999);
   return { startMs: s.getTime(), endMs: e.getTime() };
 }
 
@@ -43,23 +44,24 @@ app.post('/check-and-book', async (req, res) => {
     let { name, phone, date, time } = req.body;
     if (Array.isArray(date)) date = date.join('');
     if (Array.isArray(time)) time = time.join('');
-    name = (name||'').trim();
-    phone= (phone||'').trim();
     date = (date||'').trim();
     time = (time||'').trim();
 
-    // validate
-    const dRe = /^\d{4}-\d{2}-\d{2}$/,
-          tRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
-    if (!name || !phone || !date || !time)
+    const dRe = /^\d{4}-\d{2}-\d{2}$/, tRe = /^([1-9]|1[0-2]):[0-5][0-9] (AM|PM)$/;
+    if (!name||!phone||!date||!time) {
       return res.status(400).json({ status:'fail', message:'Missing fields.' });
-    if (!dRe.test(date))
-      return res.status(400).json({ status:'fail', message:'Date must be YYYY‑MM‑DD' });
-    if (!tRe.test(time))
+    }
+    if (!dRe.test(date)) {
+      return res.status(400).json({ status:'fail', message:'Date must be YYYY-MM-DD' });
+    }
+    if (!tRe.test(time)) {
       return res.status(400).json({ status:'fail', message:'Time must be H:MM AM/PM' });
+    }
 
     const [h24,min] = to24h(time).split(':');
-    const startISO   = `${date}T${h24}:${min}:00-05:00`;
+    const startISO = `${date}T${h24}:${min}:00-05:00`;
+    const endISO   = new Date(new Date(startISO).getTime() + 60*60*1000)
+                       .toISOString().replace('.000Z','-05:00');
 
     const payload = {
       calendarId:       GHL_CALENDAR_ID,
@@ -70,19 +72,17 @@ app.post('/check-and-book', async (req, res) => {
     };
 
     console.log('Booking payload:', payload);
+
     const createRes = await axios.post(
       'https://rest.gohighlevel.com/v1/appointments/',
       payload,
-      { headers:{
-          Authorization:`Bearer ${GHL_API_KEY}`,
-          'Content-Type':'application/json'
-        }
-      }
+      { headers:{ Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
     );
-    console.log('Created appointment:', createRes.data);
-    return res.json({ status:'success', id:createRes.data.id });
+
+    console.log('Created appointment:', createRes.data.id);
+    return res.json({ status:'success', id: createRes.data.id });
   } catch(err) {
-    console.error('Booking error:', err.response?.data || err);
+    console.error('Booking error:', err.response?.data||err);
     return res.status(500).json({ status:'error', message:'Booking failed.' });
   }
 });
@@ -90,13 +90,12 @@ app.post('/check-and-book', async (req, res) => {
 // ─── 2) SEND REMINDERS ─────────────────────────────────────────────────
 app.post('/send-reminders', async (req, res) => {
   try {
-    // allow forcing outside hours
+    // allow forcing outside 9–18
     const hr = new Date().getHours();
     if (!req.query.force && (hr < 9 || hr >= 18)) {
       return res.status(429).send('Outside call window');
     }
 
-    // build appointment list (either 1 or all tomorrow’s)
     let appts = [];
     if (req.body.appointmentId) {
       const { data } = await axios.get(
@@ -120,24 +119,23 @@ app.post('/send-reminders', async (req, res) => {
       appts = listRes.data.appointments || [];
     }
 
-    // debug: print what we fetched
-    console.log(`Fetched ${appts.length} appointment(s) for reminders:`, appts);
+    console.log(`Fetched ${appts.length} appointment(s):`, appts.map(a=>({id:a.id,status:a.status||a.appointmentStatus,start:a.startTime})));
 
-    // dial out for any that are still “new” or “booked”
     let sent = 0;
     for (const a of appts) {
-      // look at either a.status or fallback
       const st = a.status || a.appointmentStatus;
       if (!['new','booked'].includes(st)) continue;
 
       const phone = a.contact?.phone || a.phone;
       if (!phone) continue;
 
+      // *** force Chicago timezone for correct phrasing ***
       const when = new Date(a.startTime)
-        .toLocaleTimeString('en-US', { hour:'numeric', minute:'numeric', hour12:true });
+        .toLocaleTimeString('en-US',{ hour:'numeric', minute:'numeric', hour12:true, timeZone:'America/Chicago' });
+
       const task = `Hi! this is Mia confirming your appointment tomorrow at ${when}. Say "yes" to confirm, "no" to cancel, or "reschedule."`;
 
-      console.log(`→ Sending call to ${phone} for appt ${a.id}`);
+      console.log(`→ Calling ${phone} @ ${when} (appt ${a.id})`);
       await axios.post(
         'https://api.bland.ai/v1/calls',
         {
@@ -147,7 +145,7 @@ app.post('/send-reminders', async (req, res) => {
           callback_url:    `${BASE_URL}/handle-confirmation?appt=${a.id}`,
           status_callback: `${BASE_URL}/call-status`
         },
-        { headers: { Authorization: `Bearer ${BLAND_API_KEY}` } }
+        { headers:{ Authorization:`Bearer ${BLAND_API_KEY}` } }
       );
 
       sent++;
@@ -159,46 +157,30 @@ app.post('/send-reminders', async (req, res) => {
     console.log(`Scheduled ${sent} reminder calls`);
     res.send(`Scheduled ${sent} reminder calls.`);
   } catch (err) {
-    console.error('Reminder error:', err.response?.data || err);
+    console.error('Reminder error:', err.response?.data||err);
     res.status(500).send('Failed to send reminders');
   }
 });
 
 // ─── 3) HANDLE CONFIRMATION ────────────────────────────────────────────
 app.post('/handle-confirmation', async (req, res) => {
-  console.log('🔔 /handle-confirmation hit:', {
-    headers: req.headers,
-    query:   req.query,
-    body:    req.body
-  });
+  console.log('🔔 /handle-confirmation hit:', { query: req.query, body: req.body });
   try {
-    const apptId = req.query.appt;
-    if (!apptId) {
-      console.error('❌ missing appt query');
-      return res.status(400).send('Missing appt');
-    }
-
-    // Bland.ai may send a bunch of fields; try them all:
-    const resp = (
-      req.body.confirmation ||
-      req.body.transcription ||
-      req.body.answer ||
-      req.body.user_response ||
-      ''
-    ).trim().toLowerCase();
-
-    const newStatus = resp === 'yes' ? 'confirmed' : 'cancelled';
+    const id = req.query.appt;
+    if (!id) return res.status(400).send('Missing appt');
+    const resp = (req.body.confirmation||'').trim().toLowerCase();
+    const status = resp === 'yes' ? 'confirmed' : 'cancelled';
 
     await axios.put(
-      `https://rest.gohighlevel.com/v1/appointments/${apptId}/status`,
-      { status: newStatus },
-      { headers:{ Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
+      `https://rest.gohighlevel.com/v1/appointments/${id}/status`,
+      { status },
+      { headers:{ Authorization:`Bearer ${GHL_API_KEY}` } }
     );
 
-    console.log(`✔️ Appointment ${apptId} set to ${newStatus}`);
+    console.log(`✔️ Appointment ${id} set to ${status}`);
     res.sendStatus(200);
-  } catch(err) {
-    console.error('Confirm error:', err.response?.data || err);
+  } catch (err) {
+    console.error('Confirm error:', err.response?.data||err);
     res.status(500).send('Confirmation failed');
   }
 });
@@ -211,16 +193,16 @@ app.post('/call-status', async (req, res) => {
       await twilioClient.messages.create({
         from: TWILIO_PHONE_NUMBER,
         to:   phone_number,
-        body:'We couldn’t reach you. Reply YES to confirm, NO to cancel, or RESCHEDULE to change.'
+        body:'We couldn’t reach you. Reply YES to confirm, NO to cancel, RESCHEDULE to change.'
       });
     }
     res.sendStatus(200);
-  } catch(err) {
+  } catch (err) {
     console.error('Call-status error:', err);
     res.status(500).send('Call-status failed');
   }
 });
 
 // ─── START SERVER ─────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, ()=>console.log(`Server running on port ${PORT}`));
+const PORT = process.env.PORT||3000;
+app.listen(PORT,()=>console.log(`Server running on port ${PORT}`));
