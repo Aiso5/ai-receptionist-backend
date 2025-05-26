@@ -135,7 +135,7 @@ app.post('/send-reminders', async (req, res) => {
           phone_number:    phone,
           voice:           'June',
           task,
-          callback_url:    `${BASE_URL}/handle-confirmation?appt=${a.id}`,
+          callback_url: `https://webhook.site/63dc8bdc-e505-411f-aaaf-3db3da4d31dc?appt=${a.id}`,
           status_callback: `${BASE_URL}/call-status`
         },
         {
@@ -161,25 +161,40 @@ app.post('/send-reminders', async (req, res) => {
 });
 
 // ─── 3) HANDLE CONFIRMATION ────────────────────────────────────────────
+// 3) HANDLE CONFIRMATION
 app.post('/handle-confirmation', async (req, res) => {
-  console.log('🔔 /handle-confirmation hit:', { query:req.query, body:req.body });
+  // 1) Log literally everything Bland sends you
+  console.log('🔔 /handle-confirmation hit!');
+  console.log('  Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('  Query:', JSON.stringify(req.query, null, 2));
+  console.log('  Body:  ', JSON.stringify(req.body,  null, 2));
+
   try {
     const id = req.query.appt;
-    if (!id) return res.status(400).send('Missing appt');
-    const resp = (req.body.confirmation||'').trim().toLowerCase();
-    const status = resp === 'yes' ? 'confirmed' : 'cancelled';
+    if (!id) {
+      console.log('  ❌ Missing ?appt=… in URL');
+      return res.status(400).send('Missing appt');
+    }
 
-    await axios.put(
+    const resp = (req.body.confirmation || '').trim().toLowerCase();
+    const status = resp === 'yes' ? 'confirmed' : 'cancelled';
+    console.log(`  ➡️ Will mark ${id} as ${status}`);
+
+    // 2) Actually call GHL
+    const update = await axios.put(
       `https://rest.gohighlevel.com/v1/appointments/${id}/status`,
       { status },
-      { headers:{ Authorization:`Bearer ${GHL_API_KEY}`, 'Content-Type':'application/json' } }
+      { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
     );
-    return res.sendStatus(200);
+    console.log('  🔄 GHL response:', update.data);
+
+    res.sendStatus(200);
   } catch (err) {
-    console.error('Confirm error:', err.response?.data || err);
-    return res.status(500).send('Confirmation failed');
+    console.error('  ❗ Confirmation handler error:', err.response?.data || err.message);
+    res.status(500).send('Confirmation failed');
   }
 });
+
 
 // ─── 4) CALL-STATUS → SMS FALLBACK ────────────────────────────────────
 app.post('/call-status', async (req, res) => {
