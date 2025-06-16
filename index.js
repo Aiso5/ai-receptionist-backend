@@ -21,10 +21,19 @@ const {
 
 const twilioClient = twilioLib(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
-// ─── Health-check ─────────────────────────────────────────────────────────
+// ─── Helper: convert "H:MM AM/PM" → "HH:MM" (24h) ────────────────────────
+function to24h(twelveHour) {
+  const [time, mod] = twelveHour.split(' ');
+  let [h, m] = time.split(':').map(Number);
+  if (mod === 'PM' && h !== 12) h += 12;
+  if (mod === 'AM' && h === 12) h = 0;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+// ─── 0) Health-check ───────────────────────────────────────────────────────
 app.get('/', (req, res) => res.send('OK'));
 
-// ─── 1) BOOKING ───────────────────────────────────────────────────────────
+// ─── 1) BOOKING ─────────────────────────────────────────────────────────────
 app.post('/check-and-book', async (req, res) => {
   try {
     const { name, phone, date, time } = req.body;
@@ -32,8 +41,9 @@ app.post('/check-and-book', async (req, res) => {
       return res.status(400).json({ error: 'Missing name, phone, date or time' });
     }
 
-    // Build a Chicago-timezone ISO timestamp
-    const slotISO = new Date(`${date} ${time} America/Chicago`).toISOString();
+    // Convert time and build Chicago-offset ISO
+    const [h24, min] = to24h(time).split(':');
+    const slotISO = `${date}T${h24}:${min}:00-05:00`;
 
     const payload = {
       calendarId:       GHL_CALENDAR_ID,
@@ -58,23 +68,22 @@ app.post('/check-and-book', async (req, res) => {
   }
 });
 
-// ─── 2) SEND REMINDERS (single appt) ──────────────────────────────────────
+// ─── 2) REMINDERS (single appointment) ────────────────────────────────────
 app.post('/send-reminders', async (req, res) => {
   console.log('→ /send-reminders got:', req.body);
-
   try {
     const { appointmentId } = req.body;
     if (!appointmentId) {
       return res.status(400).json({ error: 'Missing appointmentId' });
     }
 
-    // fetch that one appointment
+    // Fetch that one appointment
     const { data: appt } = await axios.get(
       `https://rest.gohighlevel.com/v1/appointments/${appointmentId}`,
       { headers: { Authorization: `Bearer ${GHL_API_KEY}` } }
     );
 
-    // format appointment time in Chicago
+    // Format appointment time in America/Chicago
     const when = new Date(appt.startDateTime).toLocaleTimeString('en-US', {
       timeZone: 'America/Chicago',
       hour: 'numeric',
@@ -82,7 +91,7 @@ app.post('/send-reminders', async (req, res) => {
       hour12: true
     });
 
-    // schedule the Bland.ai call
+    // Schedule Bland.ai outbound call
     await axios.post(
       'https://api.bland.ai/v1/calls',
       {
@@ -108,7 +117,7 @@ app.post('/send-reminders', async (req, res) => {
   }
 });
 
-// ─── 3) HANDLE CONFIRMATION ───────────────────────────────────────────────
+// ─── 3) CONFIRMATION HANDLER ───────────────────────────────────────────────
 app.post('/handle-confirmation', async (req, res) => {
   try {
     const appointmentId = req.query.appt;
@@ -142,12 +151,11 @@ app.post('/handle-confirmation', async (req, res) => {
   }
 });
 
-// ─── 4) FALLBACK SMS ──────────────────────────────────────────────────────
+// ─── 4) CALL-STATUS → SMS FALLBACK ────────────────────────────────────────
 app.post('/call-status', async (req, res) => {
+  console.log('→ /call-status got:', req.body);
   try {
     const { callStatus, to } = req.body;
-    console.log('→ /call-status got:', req.body);
-
     if (['no-answer', 'busy'].includes(callStatus)) {
       await twilioClient.messages.create({
         from: TWILIO_PHONE_NUMBER,
@@ -156,7 +164,6 @@ app.post('/call-status', async (req, res) => {
       });
       console.log(`SMS fallback sent to ${to}`);
     }
-
     return res.json({ message: 'Call status processed.' });
   } catch (err) {
     console.error('Error in /call-status:', err.message);
@@ -164,5 +171,6 @@ app.post('/call-status', async (req, res) => {
   }
 });
 
+// ─── START SERVER ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
